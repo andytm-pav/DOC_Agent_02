@@ -6,6 +6,7 @@ import ChatPage from './pages/ChatPage';
 import CardIndexPage from './pages/CardIndexPage';
 import FilesPage from './pages/FilesPage';
 import AdminPage from './pages/AdminPage';
+import DocsPage from './pages/DocsPage';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 
@@ -24,6 +25,7 @@ export default function App() {
       case 'card': return <CardIndexPage />;
       case 'files': return <FilesPage />;
       case 'admin': return <AdminPage />;
+      case 'docs': return <DocsPage />;
       default: return <ChatPage />;
     }
   };

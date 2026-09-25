@@ -14,6 +14,7 @@ const pageTitles: Record<Page, string> = {
   card: 'Картотека документов',
   files: 'Управление файлами',
   admin: 'Администрирование',
+  docs: 'Техническая документация',
 };
 
 export default function Header({ user, onLogout, onToggleSidebar, currentPage }: HeaderProps) {

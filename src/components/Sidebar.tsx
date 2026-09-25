@@ -1,6 +1,6 @@
 import { Page, User } from '../types';
 import {
-  MessageSquare, Database, FileText, Settings, Bot
+  MessageSquare, Database, FileText, Settings, Bot, BookOpen
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -15,6 +15,7 @@ const navItems: { page: Page; label: string; icon: typeof MessageSquare; adminOn
   { page: 'card', label: 'Картотека', icon: Database },
   { page: 'files', label: 'Файлы', icon: FileText },
   { page: 'admin', label: 'Администрирование', icon: Settings, adminOnly: true },
+  { page: 'docs', label: 'Документация ТЗ', icon: BookOpen },
 ];
 
 export default function Sidebar({ currentPage, onNavigate, isOpen, user }: SidebarProps) {

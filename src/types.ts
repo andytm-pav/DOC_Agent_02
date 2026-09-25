@@ -58,4 +58,4 @@ export interface User {
   role: 'user' | 'admin';
 }
 
-export type Page = 'chat' | 'card' | 'files' | 'admin';
+export type Page = 'chat' | 'card' | 'files' | 'admin' | 'docs';
