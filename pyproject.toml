@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "doc-agent"
+version = "2.0.0"
+description = "Локальный ИИ-агент «Документовед»"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.115.0",
+    "uvicorn[standard]==0.32.0",
+    "jinja2==3.1.4",
+    "python-jose[cryptography]==3.3.0",
+    "passlib[bcrypt]==1.7.4",
+    "sqlalchemy==2.0.35",
+    "chromadb==0.5.11",
+    "sentence-transformers==3.2.0",
+    "cross-encoder==0.2.0",
+    "kreuzberg==3.0.0",
+    "pytesseract==0.3.13",
+    "paddleocr==2.8.1",
+    "python-docx==1.1.2",
+    "openpyxl==3.1.5",
+    "weasyprint==62.3",
+    "markdownify==0.13.1",
+    "watchdog==5.0.3",
+    "a2a-sdk==0.2.0",
+    "groundrails==1.0.0",
+    "rank-bm25==0.2.2",
+    "pydantic-settings==2.5.2",
+    "pyyaml==6.0.2",
+    "structlog==24.4.0",
+    "python-multipart==0.0.12",
+    "python-magic==0.4.27",
+    "aiofiles==24.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.3",
+    "pytest-asyncio==0.24.0",
+    "httpx==0.27.2",
+    "ruff==0.6.9",
+    "mypy==1.11.2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
