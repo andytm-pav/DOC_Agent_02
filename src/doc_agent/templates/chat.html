@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Чат — Документовед{% endblock %}
+{% block content %}
+<div class="chat-container">
+    <header class="chat-header">
+        <h1>🤖 Документовед</h1>
+        <div class="header-actions">
+            <button onclick="document.getElementById('file-input').click()">📎 Загрузить</button>
+            <input type="file" id="file-input" multiple style="display:none" onchange="uploadFiles(this.files)">
+            <a href="/admin">⚙️ Админ</a>
+        </div>
+    </header>
+
+    <div class="chat-messages" id="messages">
+        <div class="message system">
+            <p>Добро пожаловать в систему «Документовед». Загрузите файлы или задайте вопрос.</p>
+        </div>
+    </div>
+
+    <div class="chat-input-area">
+        <textarea id="chat-input" placeholder="Задайте вопрос или перетащите файл..." rows="1"></textarea>
+        <button id="send-btn" onclick="sendMessage()">➤</button>
+    </div>
+</div>
+{% endblock %}

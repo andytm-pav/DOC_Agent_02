@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Админ — Документовед{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <header>
+        <h1>⚙️ Администрирование</h1>
+        <a href="/">← Назад в чат</a>
+    </header>
+
+    <div class="admin-grid">
+        <section class="card">
+            <h2>Состояние системы</h2>
+            <div hx-get="/health" hx-trigger="load, every 10s" hx-swap="innerHTML">
+                <p>Загрузка...</p>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Очередь задач</h2>
+            <div hx-get="/admin/jobs" hx-trigger="load" hx-swap="innerHTML">
+                <p>Загрузка...</p>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Метрики</h2>
+            <div hx-get="/admin/metrics" hx-trigger="load" hx-swap="innerHTML">
+                <p>Загрузка...</p>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Действия</h2>
+            <button hx-post="/admin/reindex" hx-swap="innerHTML" hx-target="#reindex-result">
+                🔄 Переиндексация
+            </button>
+            <div id="reindex-result"></div>
+        </section>
+    </div>
+</div>
+{% endblock %}

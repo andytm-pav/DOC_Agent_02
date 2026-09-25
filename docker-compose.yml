@@ -1,0 +1,23 @@
+services:
+  ollama:
+    image: ollama/ollama:0.3.14
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  agent:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - SECRET_KEY=${SECRET_KEY}
+      - OLLAMA_URL=http://ollama:11434
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    depends_on:
+      - ollama
+
+volumes:
+  ollama_data:

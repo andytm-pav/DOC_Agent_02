@@ -1,0 +1,50 @@
+app:
+  host: 0.0.0.0
+  port: 8000
+  secret_key: "${SECRET_KEY}"
+  data_dir: "./data"
+
+storage:
+  local_paths: ["./data/storage"]
+  network_paths: []
+
+watchdog:
+  enabled: false
+  paths: ["./data/inbox"]
+  interval_sec: 30
+
+llm:
+  provider: ollama
+  base_url: "http://localhost:11434"
+  model_main: "qwen2.5:1.5b-instruct-q4_K_M"
+  model_light: "gemma2:2b-instruct-q4_K_M"
+  timeout_sec: 60
+
+embeddings:
+  model: "intfloat/multilingual-e5-small"
+  batch_size: 32
+
+reranker:
+  model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  top_k: 5
+
+chunking:
+  size_tokens: 512
+  overlap_tokens: 64
+
+ocr:
+  tesseract_langs: ["rus", "eng"]
+  min_confidence: 0.80
+  reject_threshold: 0.50
+
+groundrails:
+  enabled: true
+  cut_ratio: 0.30
+
+a2a:
+  enabled: true
+  agent_name: "document-agent"
+
+limits:
+  max_file_mb: 500
+  max_query_len: 2000
