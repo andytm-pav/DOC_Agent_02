@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/htmx.min.js" defer></script>
+    <script src="/static/app.js" defer></script>
+</head>
+<body>
+<nav class="nav">
+    <a href="/" class="brand">📁 Документовед</a>
+    <a href="/">Чат</a>
+    <a href="/admin-ui">Админ</a>
+    <span id="whoami" class="muted"></span>
+    <button id="logoutBtn" class="btn btn-ghost" onclick="logout()">Выйти</button>
+</nav>
+<main>
+    {% block content %}{% endblock %}
+</main>
+</body>
+</html>

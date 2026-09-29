@@ -1,0 +1,24 @@
+Ты классифицируешь документы. Верни СТРОГО JSON без пояснений.
+
+Схема:
+{
+  "doc_type": "ks2|ks3|ks6|ttn|ds|id|invoice|contract|other",
+  "city": "строка или null",
+  "customer": "строка или null",
+  "contract_no": "строка или null",
+  "contract_date": "YYYY-MM-DD или null",
+  "doc_number": "строка или null",
+  "doc_date": "YYYY-MM-DD или null",
+  "amount": число или null,
+  "confidence": 0.0..1.0
+}
+
+Правила:
+- Если поле не найдено в тексте — ставь null. НИКОГДА не выдумывай.
+- amount — только итоговая сумма, число без пробелов и валюты.
+- confidence — твоя уверенность в целом ответе.
+
+Текст:
+---
+{text}
+---

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Администрирование</h2>
+<div class="admin-grid">
+    <section>
+        <h3>Очередь задач</h3>
+        <button class="btn btn-primary" onclick="loadJobs()">Обновить</button>
+        <button class="btn" onclick="reindexAll()">Полная переиндексация</button>
+        <table id="jobsTable" class="table">
+            <thead><tr><th>ID</th><th>Тип</th><th>Файл</th><th>Статус</th><th>Попытки</th><th>Ошибка</th></tr></thead>
+            <tbody></tbody>
+        </table>
+    </section>
+    <section>
+        <h3>Метрики</h3>
+        <button class="btn btn-primary" onclick="loadMetrics()">Обновить</button>
+        <pre id="metricsBox" class="pre"></pre>
+    </section>
+    <section>
+        <h3>Логи (последние 200)</h3>
+        <button class="btn btn-primary" onclick="loadLogs()">Обновить</button>
+        <pre id="logsBox" class="pre"></pre>
+    </section>
+    <section class="wide">
+        <h3>Диагностика для разработчика</h3>
+        <button class="btn btn-primary" onclick="loadDebug()">Обновить</button>
+        <button class="btn" onclick="copyDebug()">Скопировать</button>
+        <span class="muted">Скопируйте этот блок и пришлите разработчику при багах — здесь статус модели, БД, вектора, очередь и последние ошибки.</span>
+        <pre id="debugBox" class="pre"></pre>
+    </section>
+</div>
+{% endblock %}

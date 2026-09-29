@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<div id="agentStatus" class="status-strip" data-status-ms="{{ status_poll_ms }}">Загружаю статус агента…</div>
+<div class="chat-tools">
+    <button id="clearHistoryBtn" class="btn btn-ghost" type="button">🧹 Очистить историю</button>
+    <button id="clearContextBtn" class="btn btn-ghost" type="button">📦 Очистить контекст (в архив)</button>
+    <button id="archiveToggleBtn" class="btn btn-ghost" type="button">🗂 Архив памяти</button>
+    <span class="muted">история и статус сохраняются между обновлениями страницы</span>
+</div>
+<div class="chat-layout">
+    <section class="chat" id="chatBox">
+        <div class="msg system">Загрузите документы и задавайте вопросы по их содержимому — отвечаю с цитатами из файлов. Попробуйте: «покажи все КС2», «сколько файлов по вилоновской?», «прочитай файл …», «что ты можешь?».</div>
+    </section>
+    <section class="side">
+        <div class="dropzone" id="dropzone">
+            <p><b>Перетащите файл сюда</b></p>
+            <p class="muted">или</p>
+            <label class="btn btn-primary" for="fileInput">Загрузить файл</label>
+            <input type="file" id="fileInput" hidden>
+            <p class="muted">PDF, DOCX, XLSX, CSV, TXT, JPG/PNG, EML, ZIP…</p>
+        </div>
+        <div id="uploadStatus" class="uploads"></div>
+        <div class="folder-panel">
+            <p><b>Импорт свалки из папки</b></p>
+            <input type="text" id="folderPath" class="folder-input"
+                   placeholder="Например: D:/Свалка_документов" value="{{ default_folder }}">
+            <label class="checkline">
+                <input type="checkbox" id="folderRecursive" checked> включая вложенные папки
+            </label>
+            <button class="btn btn-primary" id="scanFolderBtn" type="button">Импортировать папку</button>
+            <div id="folderStatus" class="folder-status muted"></div>
+        </div>
+        <div class="folder-panel" id="sortPanel" data-poll-ms="{{ sort_poll_ms }}">
+            <p><b>Разобрать свалку по папкам</b></p>
+            <p class="muted">Агент создаст папку и разложит файлы по темам — названия подпапок придумает сам по содержимому.</p>
+            <input type="text" id="sortDumpPath" class="folder-input"
+                   placeholder="Папка со свалкой, например: D:/Свалка_документов" value="{{ default_folder }}">
+            <input type="text" id="sortOutputPath" class="folder-input"
+                   placeholder="Куда сложить (пусто = рядом со свалкой)">
+            <label class="checkline">
+                <input type="checkbox" id="sortRecursive" checked> включая вложенные папки
+            </label>
+            <button class="btn btn-primary" id="sortFolderBtn" type="button">Разобрать свалку</button>
+            <div id="sortStatus" class="folder-status muted"></div>
+        </div>
+        <div class="folder-panel" id="archivePanel" hidden>
+            <p><b>Архив памяти — сжатые контексты</b></p>
+            <p class="muted">«Очистить контекст» сворачивает беседу в памятку: она не занимает контекстное окно актуальных разговоров. Спросите «вспомни …» — агент поднимет памятку и кратко расскажет.</p>
+            <div id="archiveList" class="archive-list"></div>
+        </div>
+    </section>
+</div>
+<form id="chatForm" class="chat-form" autocomplete="off">
+    <input id="chatInput" placeholder="Например: Покажи все КС2 по договору 123" maxlength="2000">
+    <button class="btn btn-primary" type="submit">Отправить</button>
+</form>
+{% endblock %}

@@ -1,0 +1,95 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "doc-agent"
+version = "2.7.0"
+description = "Локальный ИИ-агент «Документовед» — картотека документов, поиск с grounding, воспроизведение, A2A"
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+    # Web
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.32.1",
+    "jinja2==3.1.4",
+    "python-multipart==0.0.17",
+    # Auth (bcrypt 4.0.1 — последняя совместимая с passlib 1.7.4)
+    "python-jose[cryptography]==3.3.0",
+    "passlib==1.7.4",
+    "bcrypt==4.0.1",
+    # ORM / config
+    "sqlalchemy==2.0.36",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "pyyaml==6.0.2",
+    "python-dotenv==1.0.1",
+    # Logging
+    "structlog==24.4.0",
+    # Vector / search
+    "chromadb==0.5.23",
+    "posthog==2.4.0",
+    "rank-bm25==0.2.2",
+    # Extraction
+    "pdfplumber==0.11.4",
+    "pypdf==5.1.0",
+    "python-docx==1.1.2",
+    "openpyxl==3.1.5",
+    "pillow==11.0.0",
+    "markdownify==0.13.1",
+    "beautifulsoup4==4.12.3",
+    "pytesseract==0.3.13",
+    # HTTP client (LLM API, A2A)
+    "httpx==0.28.1",
+    # Watcher
+    "watchdog==6.0.0",
+    # PDF generation (fallback без системных GTK-библиотек)
+    "reportlab==4.2.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "httpx==0.28.1",
+    "ruff==0.8.4",
+    "mypy==1.14.0",
+    "types-PyYAML==6.0.12.20240917",
+]
+ml = [
+    # Полноценные эмбеддинги и реранкер (тянет torch, ~2 ГБ)
+    "sentence-transformers==3.2.1",
+]
+pdf-weasy = [
+    # WeasyPrint 62 (на Windows требует GTK: https://github.com/tschoonj/GTK-for-Windows)
+    "weasyprint==62.3",
+]
+msg = ["extract-msg==0.53.0"]
+archive7z = ["py7zr==0.22.0"]
+rar = ["rarfile==4.2"]
+paddle = ["paddleocr==2.8.3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["src/doc_agent/vendor"]  # вендоренный snowballstemmer (генерированный код)
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = false
+exclude = ["build", "data", "plugins", "src/doc_agent/vendor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]

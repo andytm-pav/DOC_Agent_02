@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Данные приложения
+data/storage/*
+data/sqlite/*
+data/chroma/*
+data/logs/*
+data/tmp/*
+data/user_words.txt
+!data/storage/.gitkeep
+!data/sqlite/.gitkeep
+!data/chroma/.gitkeep
+!data/logs/.gitkeep
+
+# Секреты
+.env
+
+# Инструменты
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
