@@ -48,13 +48,16 @@ def query(body: QueryRequest, db: Session = Depends(get_db),
     context = chat_service.context_block(user.username, settings.chat.context_max_messages)
     chat_service.add_message(user.username, "user", body.q)
     try:
-        result = run_query(body.q, limit=body.limit, db=db, context=context)
+        # actor (v3.0.0) — права файловых операций по группам users.yaml
+        result = run_query(body.q, limit=body.limit, db=db, context=context,
+                           actor=user.username or "user")
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Ошибка обработки запроса: {exc}") from exc
     chat_service.add_message(user.username, "agent", result["answer"], {
         "grounded": result["grounded"], "confidence": result["confidence"],
         "partial": result["partial"], "files": result["files"],
         "intent": result.get("intent"),
+        "known_answer_used": result.get("known_answer_used", False),
     })
     return result
 

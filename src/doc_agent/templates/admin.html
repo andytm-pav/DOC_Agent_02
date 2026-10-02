@@ -2,6 +2,19 @@
 {% block content %}
 <h2>Администрирование</h2>
 <div class="admin-grid">
+    <!-- v2.9.1: живой прогресс обработки/эмбеддингинга (автообновление) -->
+    <section class="wide" id="progressPanel" data-status-ms="{{ status_poll_ms }}">
+        <h3>Прогресс эмбеддингинга</h3>
+        <button class="btn btn-primary" onclick="loadProgress()">Обновить сейчас</button>
+        <span class="muted">обновляется автоматически каждые {{ status_poll_ms }} мс — очередь, файл в работе, темп и последние сбои.</span>
+        <div id="progressCounters" class="progress-counters"></div>
+        <div id="progressCurrent" class="progress-current"></div>
+        <table id="progressTable" class="table">
+            <thead><tr><th>ID</th><th>Файл</th><th>Тип</th><th>Статус</th><th>Чанков</th><th>Обновлён</th></tr></thead>
+            <tbody></tbody>
+        </table>
+        <div id="progressFailed" class="progress-failed"></div>
+    </section>
     <section>
         <h3>Очередь задач</h3>
         <button class="btn btn-primary" onclick="loadJobs()">Обновить</button>
@@ -15,6 +28,98 @@
         <h3>Метрики</h3>
         <button class="btn btn-primary" onclick="loadMetrics()">Обновить</button>
         <pre id="metricsBox" class="pre"></pre>
+    </section>
+    <!-- v2.9.1: все модели агента в одном месте -->
+    <section class="wide">
+        <h3>Модели агента</h3>
+        <button class="btn btn-primary" onclick="loadModels()">Обновить</button>
+        <span class="muted">LLM (основная/лёгкая/планировщик), эмбеддинги, реранкер, OCR, векторное хранилище и версии пакетов.</span>
+        <div id="modelsBox"></div>
+        <pre id="packagesBox" class="pre"></pre>
+    </section>
+    <!-- v2.9.1: документы и их чанки; v3.0.0: CRUD (реиндекс/удаление/правка) -->
+    <section class="wide">
+        <h3>Документы и чанки</h3>
+        <button class="btn btn-primary" onclick="loadDocuments()">Обновить список</button>
+        <span class="muted">«Чанки» — просмотр; «Заново» — полная переобработка из оригинала; «Удалить» — удалить документ с чанками и векторами. Внутри чанков: «Изм.» — отредактировать и сохранить текст, «×» — удалить чанк.</span>
+        <table id="documentsTable" class="table">
+            <thead><tr><th>ID</th><th>Файл</th><th>Тип</th><th>Размер</th><th>Статус</th><th>Чанков</th><th></th></tr></thead>
+            <tbody></tbody>
+        </table>
+        <div id="chunksBox" hidden>
+            <h4 id="chunksTitle"></h4>
+            <div id="chunksList" class="chunks-list"></div>
+        </div>
+    </section>
+    <!-- v3.0.0: обратная связь («дообучение» на правильных ответах) -->
+    <section class="wide">
+        <h3>Обратная связь (проверенные ответы)</h3>
+        <button class="btn btn-primary" onclick="loadFeedback()">Обновить</button>
+        <button class="btn" onclick="reembedFeedback()">Пересобрать векторы вопросов</button>
+        <span class="muted">👍/👎 и исправления пользователей. Активные записи агент подставляет в промпт на похожих вопросах и бустит отмеченные файлы в поиске.</span>
+        <div id="feedbackStats" class="muted" style="margin:6px 0;"></div>
+        <table id="feedbackTable" class="table">
+            <thead><tr><th>ID</th><th>Вопрос</th><th>Оценка</th><th>Статус</th><th>Испр.</th><th>Вес</th><th>Исп.</th><th>Файлы</th><th></th></tr></thead>
+            <tbody></tbody>
+        </table>
+        <div id="feedbackEditor" hidden>
+            <h4>Редактирование записи <span id="fbEditId"></span></h4>
+            <label class="fb-label">Вопрос<textarea id="fbQuestion" rows="2" class="folder-input"></textarea></label>
+            <label class="fb-label">Проверенный ответ (то, что агент будет отвечать)<textarea id="fbCorrected" rows="5" class="folder-input"></textarea></label>
+            <div class="fb-row">
+                <label>Оценка
+                    <select id="fbRating" class="folder-input"><option value="up">👍 полезный</option><option value="down">👎 неправильный</option></select>
+                </label>
+                <label>Статус
+                    <select id="fbStatus" class="folder-input"><option value="active">активна</option><option value="disabled">отключена</option></select>
+                </label>
+                <label>Вес (0–10)<input id="fbWeight" type="number" min="0" max="10" step="0.1" class="folder-input"></label>
+                <label>file_ids через запятую<input id="fbFileIds" class="folder-input"></label>
+            </div>
+            <button class="btn btn-primary" onclick="saveFeedback()">Сохранить</button>
+            <button class="btn" onclick="document.getElementById('feedbackEditor').hidden=true">Отмена</button>
+        </div>
+    </section>
+    <!-- v3.0.0: пользователи и группы (users.yaml) -->
+    <section class="wide">
+        <h3>Пользователи и группы</h3>
+        <button class="btn btn-primary" onclick="loadUsersPanel()">Обновить</button>
+        <span class="muted" id="usersFileInfo"></span>
+        <div class="fb-row">
+            <input id="newUserName" class="folder-input" placeholder="логин нового пользователя" style="max-width:220px;">
+            <input id="newUserPass" class="folder-input" placeholder="пароль (мин. 4)" style="max-width:180px;">
+            <input id="newUserGroups" class="folder-input" placeholder="группы через запятую (users)" style="max-width:260px;">
+            <button class="btn btn-primary" onclick="createUser()">Создать</button>
+        </div>
+        <table id="usersTable" class="table">
+            <thead><tr><th>Логин</th><th>Имя</th><th>Группы</th><th>Права</th><th>Активен</th><th></th></tr></thead>
+            <tbody></tbody>
+        </table>
+        <h4>Группы (права и песочница файловых операций)</h4>
+        <div class="fb-row">
+            <input id="newGroupName" class="folder-input" placeholder="имя новой группы" style="max-width:200px;">
+            <button class="btn btn-primary" onclick="createGroup()">Добавить группу</button>
+        </div>
+        <div id="groupsBox" class="groups-box"></div>
+    </section>
+    <!-- v3.0.0: файлы на диске (память путей + операции) -->
+    <section class="wide">
+        <h3>Файлы на диске</h3>
+        <button class="btn btn-primary" onclick="loadLocations()">Обновить</button>
+        <span class="muted">запомненные пути файлов (импорт папки, операции агента, ручной ввод). Разрешённые корни: <span id="allowedRoots"></span></span>
+        <div class="fb-row">
+            <input id="locFileId" class="folder-input" placeholder="file_id" style="max-width:90px;">
+            <input id="locPath" class="folder-input" placeholder="абсолютный путь к файлу на диске" >
+            <button class="btn btn-primary" onclick="addLocation()">Запомнить путь</button>
+        </div>
+        <table id="locationsTable" class="table">
+            <thead><tr><th>file_id</th><th>Файл</th><th>Путь</th><th>Тип</th><th>Актуален</th><th></th></tr></thead>
+            <tbody></tbody>
+        </table>
+        <div class="fb-row">
+            <input id="mkdirPath" class="folder-input" placeholder="создать папку: абсолютный путь" >
+            <button class="btn" onclick="mkdirHere()">Создать папку</button>
+        </div>
     </section>
     <section>
         <h3>Логи (последние 200)</h3>

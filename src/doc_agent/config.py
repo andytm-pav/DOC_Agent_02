@@ -257,6 +257,9 @@ class PlannerSettings(BaseModel):
     allowed_actions: list[str] = Field(default_factory=lambda: [
         "count_files", "list_files", "find_files", "read_file",
         "search_content", "help", "direct",
+        # v3.0.0: файловые операции на диске (память о путях + sandbox;
+        # права — группы в users.yaml, пороги — секция files)
+        "file_link", "file_move", "file_copy", "file_mkdir",
     ])
     allow_direct_reply: bool = True  # прямой ответ на приветствия/благодарности
     # Сбой планировщика или «механизм не дал ответа» -> детерминированные
@@ -268,6 +271,69 @@ class PlannerSettings(BaseModel):
     context_max_chars: int = 1200    # сколько контекста беседы отдать планировщику
     catalog_for_planner: bool = True # отдавать картотеку планировщику (выбор файла)
     catalog_max_chars: int = 4000
+
+
+class FeedbackSettings(BaseModel):
+    """Обратная связь («дообучение» на проверенных ответах, v3.0.0).
+
+    Пользователь ставит 👍/👎 и может дать исправленный ответ; записи
+    хранятся в SQLite (feedback_entries) вместе с вектором вопроса.
+    На похожий вопрос (эмбеддинг-похожесть >= similarity_threshold):
+      - проверенный ответ подставляется в промпт репортера
+        (inject_known_answers, максимум max_inject);
+      - документы, отмеченные 👍, получают буст в ретриве
+        (boost_documents: множитель RRF-score, cap boost_cap).
+    Никаких привязок к фразам — только эмбеддинг-похожесть (LLM-first).
+    Администрирование — админ-вкладка «Обратная связь».
+    """
+
+    enabled: bool = True
+    # Косинус-похожесть вопроса на сохранённый (0..1). Калибровка по
+    # замерам e5-small: перефразированный вопрос 0.43-0.57, посторонние
+    # темы <=0.19 — порог 0.80 никогда не срабатывал (у сильных моделей
+    # «почти тот же вопрос», для e5-small недостижим). 0.45 ловит
+    # перефразы с общими словами-смыслами и держит запас от посторонних.
+    # Для hashing-бэкенда (лексика) — 0.85+.
+    # После смены модели эмбеддингов пересоберите векторы (админ-вкладка)
+    # и при необходимости откалибруйте порог заново.
+    similarity_threshold: float = 0.45
+    inject_known_answers: bool = True
+    max_inject: int = 2
+    boost_documents: bool = True
+    # Множитель буста за 👍 (и минус за 👎): score * (1 + bonus*weight*sim),
+    # суммарный бонус по документу ограничен boost_cap.
+    boost_bonus: float = 0.20
+    boost_cap: float = 0.50
+
+
+class FilesSettings(BaseModel):
+    """Файлы на диске: память о путях + операции (v3.0.0).
+
+    Агент запоминает пути импортированных файлов, даёт ссылки по запросу
+    и умеет перемещать/копировать файлы и создавать папки. Sandbox:
+    операции возможны ТОЛЬКО внутри разрешённых корней — общий список
+    здесь + корни групп пользователей (users.yaml, allowed_roots).
+    Пусто = файловые операции в чате отключены (только просмотр путей).
+    """
+
+    enabled: bool = True
+    # Разрешённые корни для операций (Windows-пример: ["D:/Документы",
+    # "C:/Users/ivAN/Рабочий"]). Пути должны быть абсолютными.
+    allowed_roots: list[str] = Field(default_factory=list)
+    # Защита от случайной работы с гигантскими файлами.
+    max_move_mb: int = 2048
+
+
+class UsersSettings(BaseModel):
+    """Пользователи и группы (v3.0.0) — ОТДЕЛЬНЫЙ файл (бэкап).
+
+    Путь относительно корня проекта или абсолютный. Файл создаётся при
+    первом старте (существующие пользователи SQLite переносятся);
+    редактируется в админ-вкладке «Пользователи и группы» или руками —
+    формат и правила в README (раздел «Пользователи и группы»).
+    """
+
+    file: str = "config/users.yaml"
 
 
 class WatchdogSettings(BaseModel):
@@ -327,34 +393,29 @@ class EmbeddingsSettings(BaseModel):
     # лексическое совпадение токенов, НЕ семантика: они и были причиной
     # мусорной выдачи на реальных вопросах.
     backend: str = "auto"             # auto | hashing | sentence_transformers | api
+    # v2.9: ЛОКАЛЬНАЯ модель (backend: sentence_transformers) — любой каталог
+    # Hugging Face. Первый запуск скачивает модель, дальше — офлайн.
     model: str = "intfloat/multilingual-e5-small"
     batch_size: int = 32
+    # v2.9: устройство локальной модели: "" = авто (CUDA, если есть, иначе
+    # CPU); "cpu" — принудительно CPU; "cuda" — только при CUDA-torch.
+    device: str = ""
+    # v2.9: размерность локальной модели: 0 = взять фактическую после
+    # загрузки (e5-small = 384, bge-m3 = 1024). Смена = новое векторное
+    # пространство = переиндексация (коллекция подберётся сама при
+    # vector.auto_collection_suffix: true).
+    dimensions: int = 0
+    # v2.9: префиксы E5-моделей (e5-small/e5-base...) ОБЯЗАТЕЛЬНЫ — без них
+    # качество поиска падает. Другим локальным моделям (bge-m3,
+    # paraphrase-*) префиксы не нужны — поставьте "".
+    query_prefix: str = "query: "
+    passage_prefix: str = "passage: "
     # v2.7: морфология (Snowball ru) для ЛЕКСИЧЕСКИХ механизмов — BM25,
     # реранкер, hashing-эмбеддинги, grounding. Для api/sentence_transformers
     # НЕ применяется (модели сами понимают флексию, обрезка им вредит).
     # После включения/выключения нужна переиндексация (векторный пейсмаж
     # меняется при hashing-бэкенде).
     stem_lexical: bool = True
-    # --- v2.9: ЛОКАЛЬНАЯ МОДЕЛЬ (backend: sentence_transformers) ---
-    # Поля device/dimensions/query_prefix/passage_prefix применяются
-    # ТОЛЬКО к локальному бэкенду (api/hashing их игнорируют).
-    # Модель качается с huggingface.co при ПЕРВОМ старте (e5-small ~470 МБ),
-    # далее живёт в кэше HF и работает офлайн. Медленная сеть — переменная
-    # окружения HF_ENDPOINT=https://hf-mirror.com перед запуском.
-    # Устройство вычисления: "" = авто (CUDA, если доступна, иначе CPU);
-    # "cpu" — принудительно CPU; "cuda" — при установленном CUDA-torch.
-    device: str = ""
-    # Переопределение размерности локальной модели: 0 = взять фактическую
-    # из модели после загрузки (e5-small = 384, bge-m3 = 1024). Задайте,
-    # если хотите видеть dim в диагностике до первого запуска. Смена
-    # значения = новое векторное пространство = новая коллекция (авто
-    # при vector.auto_collection_suffix: true).
-    dimensions: int = 0
-    # E5-модели требуют префиксов "query: "/"passage: " — без них качество
-    # поиска заметно падает. Другим локальным моделям (BAAI/bge-m3,
-    # paraphrase-multilingual-*) префиксы не нужны: поставьте "".
-    query_prefix: str = "query: "
-    passage_prefix: str = "passage: "
     # backend: api — настоящий эмбеддинг по API (v2.6), без отдельного ключа:
     # наследует base_url/api_key секции llm, если не переопределено тут.
     api: EmbeddingApiSettings = Field(default_factory=EmbeddingApiSettings)
@@ -502,6 +563,9 @@ class Settings(BaseModel):
     chat: ChatSettings = Field(default_factory=ChatSettings)
     qa: QaSettings = Field(default_factory=QaSettings)
     planner: PlannerSettings = Field(default_factory=PlannerSettings)
+    feedback: FeedbackSettings = Field(default_factory=FeedbackSettings)
+    files: FilesSettings = Field(default_factory=FilesSettings)
+    users: UsersSettings = Field(default_factory=UsersSettings)
     watchdog: WatchdogSettings = Field(default_factory=WatchdogSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     embeddings: EmbeddingsSettings = Field(default_factory=EmbeddingsSettings)

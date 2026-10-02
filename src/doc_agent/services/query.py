@@ -26,6 +26,8 @@ from doc_agent.db.session import get_session_factory
 from doc_agent.llm.ollama_client import get_llm
 from doc_agent.llm.prompts import get_prompt
 from doc_agent.logging import get_logger
+from doc_agent.services import feedback as feedback_service
+from doc_agent.services import fileops as fileops_service
 from doc_agent.services.deep_read import try_deep_read
 from doc_agent.services.intents import (
     catalog_block,
@@ -113,7 +115,8 @@ def _maybe_synthesize(question: str, res: dict) -> dict:
     return out
 
 
-def _run_plan(question: str, db: Session, plan: dict[str, Any]) -> dict | None:
+def _run_plan(question: str, db: Session, plan: dict[str, Any],
+              actor: str | None = None) -> dict | None:
     """Исполняет план планировщика детерминированным механизмом.
 
     None — механизм не смог дать ответ (например, read_file без совпадений):
@@ -156,16 +159,22 @@ def _run_plan(question: str, db: Session, plan: dict[str, Any]) -> dict | None:
         return try_deep_read(
             question, db, require_cue=False,
             file_ids=plan.get("file_ids") or None, terms=terms or None)
+    # v3.0.0: файловые операции на диске (пути/переместить/скопировать/
+    # создать папку) — sandbox + права группы (services/fileops.py)
+    if action in ("file_link", "file_move", "file_copy", "file_mkdir"):
+        return fileops_service.run_plan_action(question, action, plan, db, actor)
     # search_content — обычный RAG-путь ниже (с search_query/doc_type плана)
     return None
 
 
 def run_query(
     question: str, limit: int = 20, db: Session | None = None, context: str | None = None,
+    actor: str | None = None,
 ) -> dict:
     """context — актуальный контекст беседы (прошлые сообщения); передаётся
     планировщику и репортеру. Заархивированная беседа сюда не попадает
-    (services.chat)."""
+    (services.chat). actor — имя пользователя чата (v3.0.0): нужно для
+    проверки прав файловых операций (группы users.yaml)."""
     settings = load_settings()
     question = (question or "").strip()[: settings.limits.max_query_len]
 
@@ -180,7 +189,7 @@ def run_query(
 
         # 2. механизм по плану
         if plan is not None:
-            routed = _run_plan(question, db, plan)
+            routed = _run_plan(question, db, plan, actor)
             if routed is not None:
                 return routed
             # механизм не дал ответа (не search_content — тот идёт в RAG)
@@ -225,9 +234,16 @@ def run_query(
             return _refusal(question, db, filters)
 
         # 4. reporter (LLM или экстрактивный); картотека — чтобы агент
-        #    «знал», какие файлы вообще есть в картотеке
+        #    «знал», какие файлы вообще есть в картотеке; v3.0.0: проверенные
+        #    ответы из обратной связи (похожесть вопроса по эмбеддингу)
+        known_block = ""
+        try:
+            known_block = feedback_service.known_answers_block(question, db)
+        except Exception as exc:  # noqa: BLE001 — фидбэк не должен ломать ответ
+            log.warning("known_answers_failed", error=str(exc))
         raw_answer = _reporter.run(
-            question, fragments, context=context, catalog=catalog_block(db))
+            question, fragments, context=context, catalog=catalog_block(db),
+            known_answers=known_block)
 
         # 5-6. groundrails + числовая валидация
         validated = _validator.run(raw_answer, fragments)
@@ -265,6 +281,8 @@ def run_query(
             "partial": bool(validated.get("partial")),
             "filters": filters,
             "cut_ratio": validated.get("cut_ratio", 0.0),
+            # v3.0.0: в ответе использован проверенный ответ из обратной связи
+            "known_answer_used": bool(known_block),
         }
         # 6.7 вместо голого «НЕТ ДАННЫХ» — подсказка похожих файлов картотеки
         if no_data:

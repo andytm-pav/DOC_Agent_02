@@ -83,9 +83,57 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px; }
 }
 .msg .meta { margin-top: 6px; color: var(--muted); font-size: 12px; }
 
-.chat-form {
-    display: flex; gap: 10px; margin-top: 16px;
+/* v2.9.1: Markdown в ответах агента. У .msg white-space: pre-wrap —
+   для HTML от markdown он даёт двойные отступы, поэтому у agent-сообщений
+   обычный режим (переносы делает сам markdown, breaks: true). */
+.msg.agent { white-space: normal; }
+.msg.agent > :first-child { margin-top: 0; }
+.msg.agent > :last-child { margin-bottom: 0; }
+.msg.agent p { margin: 6px 0; }
+.msg.agent h1, .msg.agent h2, .msg.agent h3, .msg.agent h4 {
+    margin: 10px 0 6px; line-height: 1.3;
 }
+.msg.agent h1 { font-size: 1.25em; }
+.msg.agent h2 { font-size: 1.15em; }
+.msg.agent h3, .msg.agent h4 { font-size: 1.05em; }
+/* Таблицы: границы + горизонтальный скролл широких (паттерн GitHub) */
+.msg.agent table {
+    border-collapse: collapse; margin: 8px 0; font-size: 13px;
+    display: block; max-width: 100%; overflow-x: auto;
+}
+.msg.agent th, .msg.agent td {
+    border: 1px solid #475569; padding: 5px 10px; text-align: left;
+}
+.msg.agent th { background: #334155; font-weight: 600; }
+.msg.agent ul, .msg.agent ol { margin: 6px 0; padding-left: 22px; }
+.msg.agent li { margin: 2px 0; }
+.msg.agent code {
+    background: #0f172a; border-radius: 4px; padding: 1px 5px;
+    font-family: Consolas, "Courier New", monospace; font-size: 12.5px;
+}
+.msg.agent pre {
+    background: #0f172a; padding: 10px 12px; border-radius: 8px;
+    overflow-x: auto; margin: 8px 0;
+}
+.msg.agent pre code { background: none; padding: 0; }
+.msg.agent blockquote {
+    border-left: 3px solid var(--accent); margin: 6px 0;
+    padding: 2px 12px; color: var(--muted);
+}
+.msg.agent a { color: var(--accent); }
+.msg.agent hr { border: none; border-top: 1px solid #475569; margin: 10px 0; }
+
+.chat-form {
+    display: flex; gap: 10px; margin-top: 16px; align-items: flex-end;
+}
+.chat-form textarea {
+    /* v2.9.1: поле ввода — textarea (Shift+Enter = перенос строки). */
+    flex: 1; padding: 12px 14px; border-radius: var(--radius);
+    border: 1px solid #475569; background: var(--panel); color: var(--text);
+    font-size: 15px; font-family: inherit; line-height: 1.45;
+    resize: none; min-height: 46px; max-height: 180px; overflow-y: auto;
+}
+.chat-form textarea:focus { outline: none; border-color: var(--accent-2); }
 .chat-form input {
     flex: 1; padding: 12px 14px; border-radius: var(--radius);
     border: 1px solid #475569; background: var(--panel); color: var(--text); font-size: 15px;
@@ -171,3 +219,68 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px; }
     background: var(--panel); border-radius: var(--radius); padding: 12px;
     max-height: 340px; overflow: auto; font-size: 12px; white-space: pre-wrap;
 }
+
+/* v2.9.1: панель «Прогресс эмбеддингинга» */
+.progress-counters {
+    display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0 10px;
+}
+.pcounter {
+    background: var(--panel-2); border-radius: var(--radius);
+    padding: 8px 16px; min-width: 92px; text-align: center;
+    border: 1px solid #334155;
+}
+.pcounter-num { font-size: 22px; font-weight: 700; }
+.pcounter-label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+.pcounter.ok .pcounter-num { color: var(--ok); }
+.pcounter.err .pcounter-num { color: var(--err); }
+.pcounter.warn .pcounter-num { color: #fbbf24; }
+.pcounter.run .pcounter-num { color: var(--accent); }
+.progress-current {
+    background: var(--panel); border-radius: var(--radius);
+    padding: 9px 12px; font-size: 13px; margin-bottom: 10px;
+}
+.progress-failed { margin-top: 10px; font-size: 12.5px; line-height: 1.5; }
+
+/* v2.9.1: просмотр чанков документа */
+.chunks-list {
+    display: flex; flex-direction: column; gap: 6px;
+    max-height: 480px; overflow: auto; margin-top: 8px;
+}
+.chunk-item {
+    background: var(--panel); border-radius: 8px; padding: 6px 10px; font-size: 13px;
+}
+.chunk-item summary { cursor: pointer; color: var(--accent); }
+.chunk-item pre {
+    margin: 8px 0 4px; white-space: pre-wrap; word-break: break-word;
+    font-size: 12px; color: var(--text); max-height: 320px; overflow: auto;
+}
+
+/* v3.0.0: обратная связь в чате (👍/👎 + исправление) */
+.fb-strip { margin-top: 8px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.fb-btn { padding: 2px 10px; font-size: 15px; }
+.fb-form { display: flex; gap: 6px; align-items: flex-start; width: 100%; margin-top: 4px; }
+.fb-textarea {
+    flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid #475569;
+    background: var(--panel); color: var(--text); font-size: 13px;
+    font-family: inherit; resize: vertical; min-height: 40px;
+}
+.fb-thanks { font-size: 12px; }
+
+/* v3.0.0: админ-панели (фидбэк, пользователи, файлы на диске) */
+.fb-label { display: block; font-size: 13px; margin: 8px 0 4px; }
+.fb-label textarea { margin-top: 4px; min-height: 52px; }
+.fb-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+.fb-row label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.fb-row input, .fb-row select { min-width: 140px; }
+.fb-qcell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.groups-box { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
+.group-editor {
+    background: var(--panel-2); border-radius: var(--radius);
+    padding: 10px 12px; font-size: 13px; display: flex; flex-direction: column; gap: 8px;
+}
+.perm-checks { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.loc-path { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: Consolas, monospace; font-size: 12px; }
+.chunk-editor { margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
+.chunk-editor textarea { min-height: 90px; }
+#feedbackEditor { background: var(--panel-2); border-radius: var(--radius); padding: 10px 14px; margin-top: 10px; }
+#feedbackEditor h4 { margin: 4px 0 6px; }

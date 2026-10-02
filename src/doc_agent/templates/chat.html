@@ -51,7 +51,10 @@
     </section>
 </div>
 <form id="chatForm" class="chat-form" autocomplete="off">
-    <input id="chatInput" placeholder="Например: Покажи все КС2 по договору 123" maxlength="2000">
+    <!-- v2.9.1: textarea вместо input — Enter отправляет, Shift+Enter даёт
+         перенос строки; табуляции и переносы сохраняются на канве чата. -->
+    <textarea id="chatInput" rows="1" placeholder="Например: Покажи все КС2 по договору 123"
+              maxlength="2000"></textarea>
     <button class="btn btn-primary" type="submit">Отправить</button>
 </form>
 {% endblock %}

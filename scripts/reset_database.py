@@ -1,20 +1,24 @@
 """Полный сброс «Документоведа»: база, история чата, векторный индекс,
-загруженные файлы (v2.7 — запрос пользователя после загрязнённого индекса:
-«нужен скрипт, который полностью сотрёт базу историю и мы попробуем
-заново»).
+загруженные файлы, обратная связь (v3.0.0 — запрос пользователя: «возможность
+полностью обнулить (рестартнуть) Агента, а так же удалить базу»).
 
 Запускать ПРИ ОСТАНОВЛЕННОМ сервере (uvicorn/app.py не должен держать БД).
 
 Режимы (по умолчанию — ПОЛНЫЙ сброс):
-  (без флагов)   БД (файлы, чанки, таблицы, связи, jobs, audit) + история
-                 чата и архивы памяти + векторный индекс + загруженные файлы
+  (без флагов)   БД (файлы, чанки, таблицы, связи, jobs, audit, ОБРАТНАЯ
+                 СВЯЗЬ, пути файлов) + история чата и архивы памяти +
+                 векторный индекс + загруженные файлы.
+                 ВАЖНО: config/users.yaml (пользователи и группы) НЕ трогается
+                 — это конфигурация, её бэкапят отдельно.
   --keep-files   полный сброс, НО оставить загруженные оригиналы
-                 (data/storage) — файлы останутся в БД? НЕТ: БД чистится,
-                 оригиналы останутся на диске, их можно заново импортировать
-                 папкой без повторного копирования из внешнего источника
+                 (data/storage): БД чистится, оригиналы остаются на диске,
+                 их можно заново импортировать папкой без повторного
+                 копирования из внешнего источника
   --history-only стереть ТОЛЬКО историю чата и архивы памяти
   --vectors-only стереть ТОЛЬКО векторный индекс (после смены backend/
                  чанкинга; переиндексация — кнопка в админ-панели)
+  --feedback-only стереть ТОЛЬКО базу обратной связи (проверенные ответы:
+                 «дообучение» начнётся с нуля)
   --yes          без интерактивного подтверждения
 
 Пути — из config/config.yaml (app.data_dir и подпапки), ничего не
@@ -79,6 +83,22 @@ def wipe_history() -> None:
     print(f"  сообщений удалено: {m}, памяток удалено: {a}")
 
 
+def wipe_feedback() -> None:
+    """v3.0.0: очистка базы обратной связи (проверенные ответы)."""
+    print("[1/1] Обратная связь (проверенные ответы, feedback_entries)")
+    init_db()
+    from sqlalchemy import delete
+
+    from doc_agent.db.models import FeedbackEntry
+    from doc_agent.db.session import get_session_factory
+
+    factory = get_session_factory()
+    with factory() as db:
+        n = db.execute(delete(FeedbackEntry)).rowcount
+        db.commit()
+    print(f"  записей обратной связи удалено: {n}")
+
+
 def wipe_vectors() -> None:
     print("[1/1] Векторный индекс (Chroma/lite)")
     s = load_settings()
@@ -89,7 +109,7 @@ def wipe_vectors() -> None:
 
 
 def wipe_all(keep_files: bool) -> None:
-    print("[1/4] База данных (файлы, чанки, таблицы, jobs, audit, юзеры)")
+    print("[1/4] База данных (файлы, чанки, таблицы, jobs, audit, фидбэк, пути)")
     s = load_settings()
     dbf = db_file()
     removed = 0
@@ -110,6 +130,14 @@ def wipe_all(keep_files: bool) -> None:
     else:
         print(f"  сохранено: {s.app.sub_dir(s.app.storage_subdir)}")
 
+    # v3.0.0: users.yaml — конфигурация, не данные: намеренно НЕ удаляется.
+    try:
+        from doc_agent.services import users_store
+
+        print(f"  пользователи и группы сохранены (users.yaml): {users_store.users_file()}")
+    except Exception:  # noqa: BLE001
+        pass
+
 
 def recreate() -> None:
     print("\nПересоздание схемы и администратора…")
@@ -117,11 +145,18 @@ def recreate() -> None:
     s = load_settings()
     print(f"  БД: {db_file()}")
     print(f"  администратор: {s.app.admin_username} (пароль из .env/app.admin_password)")
+    try:
+        from doc_agent.services import users_store
+
+        if users_store.users_file().exists():
+            print(f"  пользователи/группы (users.yaml): {users_store.users_file()}")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Полный сброс «Документоведа» (v2.7). Запускать при остановленном сервере.")
+        description="Полный сброс «Документоведа» (v3.0.0). Запускать при остановленном сервере.")
     parser.add_argument("--yes", action="store_true", help="без подтверждения")
     parser.add_argument("--keep-files", action="store_true",
                         help="не трогать загруженные файлы (data/storage)")
@@ -129,11 +164,14 @@ def main() -> int:
                         help="стереть только историю чата и архивы памяти")
     parser.add_argument("--vectors-only", action="store_true",
                         help="стереть только векторный индекс")
+    parser.add_argument("--feedback-only", action="store_true",
+                        help="стереть только базу обратной связи (проверенные ответы)")
     args = parser.parse_args()
 
     modes = [m for m, on in
              (("history", args.history_only), ("vectors", args.vectors_only),
-              ("full", not (args.history_only or args.vectors_only))) if on]
+              ("feedback", args.feedback_only),
+              ("full", not (args.history_only or args.vectors_only or args.feedback_only))) if on]
     mode = modes[0]
 
     print("=" * 62)
@@ -152,6 +190,8 @@ def main() -> int:
         wipe_history()
     elif mode == "vectors":
         wipe_vectors()
+    elif mode == "feedback":
+        wipe_feedback()
     else:
         wipe_all(keep_files=args.keep_files)
     recreate()

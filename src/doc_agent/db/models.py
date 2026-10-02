@@ -173,3 +173,61 @@ class ContextArchive(Base):
 
 
 Index("idx_archives_user", ContextArchive.user, ContextArchive.id)
+
+
+# --- v3.0.0: ОБРАТНАЯ СВЯЗЬ («дообучение» агента на проверенных ответах) ---
+class FeedbackEntry(Base):
+    """Запись обратной связи пользователя (👍/👎 + исправленный ответ).
+
+    «Дообучение» без изменения весов модели: проверенные ответы хранятся
+    локально (SQLite) вместе с вектором вопроса; на похожий вопрос агент
+    подставляет проверенный ответ в промпт и повышает шансы «полезных»
+    документов в ретриве (services/feedback.py). Веса и пороги —
+    config.yaml (секция feedback). Администрирование — админ-вкладка
+    «Обратная связь»: правка, отключение, удаление.
+    """
+
+    __tablename__ = "feedback_entries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user: Mapped[str] = mapped_column(String, nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    rating: Mapped[str] = mapped_column(String, nullable=False, default="up")  # up | down
+    corrected_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_ids: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON [int]
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active")  # active | disabled
+    weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    uses_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_used_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    # вектор вопроса (эмбеддинг текущего backend) — hex-строка float32
+    # (array('f').tobytes().hex()); None = не вычислен (админ-кнопка
+    # «Пересобрать векторы»)
+    vector: Mapped[str | None] = mapped_column(Text, nullable=True)
+    vector_dim: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=utcnow)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False, default=utcnow, onupdate=utcnow)
+
+
+Index("idx_feedback_status", FeedbackEntry.status)
+
+
+# --- v3.0.0: ПАМЯТЬ О ПУТЯХ ФАЙЛОВ НА ДИСКЕ (файловые операции в чате) ---
+class FileLocation(Base):
+    """Известный агенту путь файла на диске.
+
+    Запоминается при импорте папки (оригинальное расположение), при
+    перемещении/копировании средствами агента (services/fileops.py) и
+    вручную в админ-вкладке «Файлы на диске». is_current=0 — путь
+    устарел (файл перемещён), строка остаётся как история.
+    """
+
+    __tablename__ = "file_locations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[int] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="original")  # original | moved | copied | exported | manual
+    is_current: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=utcnow)
+
+
+Index("idx_locations_file", FileLocation.file_id)

@@ -13,6 +13,7 @@ from doc_agent.api import (
     routes_auth,
     routes_card,
     routes_chat,
+    routes_feedback,
     routes_files,
     routes_query,
     routes_status,
@@ -23,6 +24,7 @@ from doc_agent.db.migrations import init_db
 from doc_agent.db.session import check_db
 from doc_agent.llm.ollama_client import llm_healthy
 from doc_agent.logging import get_logger, setup_logging
+from doc_agent.services import users_store
 from doc_agent.services.jobs import start_worker, stop_worker
 from doc_agent.services.watcher import start_watcher, stop_watcher
 from doc_agent.vector.chroma_client import get_vector_store, vector_degraded
@@ -40,6 +42,12 @@ async def lifespan(app: FastAPI):
     settings.app.sub_dir("logs")
     settings.app.sub_dir("inbox")
     init_db()
+    # v3.0.0: пользователи/группы в отдельном файле (users.yaml) — создаётся
+    # при первом старте, SQLite-пользователи переносятся (bcrypt совместим)
+    try:
+        users_store.ensure_users_file()
+    except Exception as exc:  # noqa: BLE001 — старт не должен падать из-за файла
+        log.warning("users_file_ensure_failed", error=str(exc))
     get_vector_store()
     start_worker()
     start_watcher()
@@ -57,6 +65,7 @@ app.include_router(routes_files.router)
 app.include_router(routes_card.router)
 app.include_router(routes_query.router)
 app.include_router(routes_chat.router)
+app.include_router(routes_feedback.router)
 app.include_router(routes_status.router)
 app.include_router(routes_admin.router)
 app.include_router(routes_a2a.router)

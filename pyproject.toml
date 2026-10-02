@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc-agent"
-version = "2.9.0"
+version = "3.0.0"
 description = "Локальный ИИ-агент «Документовед» — картотека документов, поиск с grounding, воспроизведение, A2A"
 requires-python = ">=3.11"
 readme = "README.md"

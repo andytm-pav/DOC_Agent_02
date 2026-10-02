@@ -427,9 +427,24 @@ def scan_folder(
             continue
         if res.get("dedup"):
             summary["duplicates"] += 1
+            # v3.0.0: путь всё равно запоминаем — агент «знает», где лежит файл
+            try:
+                from doc_agent.services import fileops as _fileops
+
+                _fileops.remember(int(res["file_id"]), str(p.resolve()), kind="seen")
+            except Exception:  # noqa: BLE001 — память путей не ломает импорт
+                pass
         elif res.get("status") == "queued":
             summary["queued"] += 1
             summary["file_ids"].append(res["file_id"])
+            # v3.0.0: запомнить ОРИГИНАЛЬНОЕ расположение файла на диске —
+            # по нему агент даст путь/ссылку и сможет перемещать/копировать
+            try:
+                from doc_agent.services import fileops as _fileops
+
+                _fileops.remember(int(res["file_id"]), str(p.resolve()), kind="original")
+            except Exception:  # noqa: BLE001
+                pass
         elif res.get("status") == "failed":
             summary["failed"] += 1
 

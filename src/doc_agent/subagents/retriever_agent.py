@@ -242,13 +242,26 @@ class RetrieverAgent:
         # filename-boost: имя файла совпало с термами запроса -> буст всем
         # его чанкам (общий сигнал, LLM-first совместим: это ранжирование,
         # а не выбор механизма).
+        file_by_chunk = {c.id: c.file_id for c in chunks}
         boosted_files = self._name_matched_files(query, candidates) if s.filename_boost > 0 else set()
         if boosted_files:
-            file_by_chunk = {c.id: c.file_id for c in chunks}
             for cid, sc in list(fused_scores.items()):
                 if file_by_chunk.get(cid) in boosted_files:
                     fused_scores[cid] = sc * (1.0 + s.filename_boost)
             log.info("filename_boost_applied", files=sorted(boosted_files))
+
+        # v3.0.0: буст документов из обратной связи (👍 на похожих вопросах,
+        # 👎 ослабляет). Совпадение вопросов — по эмбеддинг-похожести,
+        # пороги/веса в config.yaml (feedback.*); это ранжирование, а не
+        # выбор механизма — LLM-first совместимо.
+        try:
+            from doc_agent.services import feedback as feedback_service
+
+            boosted = feedback_service.apply_boost(fused_scores, file_by_chunk, query)
+            if boosted:
+                log.info("feedback_boost_applied", files=sorted(boosted))
+        except Exception as exc:  # noqa: BLE001 — фидбэк не должен ломать поиск
+            log.warning("feedback_boost_failed", error=str(exc))
 
         ordered_ids = sorted(fused_scores, key=lambda cid: fused_scores[cid], reverse=True)[: limit * 3]
         raw_score = dict(bm25_hits) | dict(vec_hits)

@@ -1,0 +1,18 @@
+users:
+- username: admin
+  password_hash: $2b$12$RnRDRCuKTVa2f6lh.bZG4OrC.qhpuVP1x1/iIRlZHdrwfKo6VNrce
+  display_name: Администратор
+  groups:
+  - admins
+  is_active: true
+groups:
+  admins:
+    permissions:
+    - admin
+    allowed_roots: []
+  users:
+    permissions:
+    - chat
+    - feedback_submit
+    - files_view
+    allowed_roots: []

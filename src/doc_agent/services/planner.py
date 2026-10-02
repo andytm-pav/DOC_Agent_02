@@ -51,6 +51,9 @@ def _validate(raw: str, db: Session) -> dict[str, Any] | None:
         return None
     if action == "direct" and not p.allow_direct_reply:
         return None
+    # v3.0.0: файловые операции требуют path (кроме file_link — путь не нужен)
+    if action in ("file_move", "file_copy", "file_mkdir") and not str(data.get("path") or "").strip():
+        return None
 
     doc_type: str | None = None
     raw_type = data.get("doc_type")
@@ -94,6 +97,16 @@ def _validate(raw: str, db: Session) -> dict[str, Any] | None:
     if isinstance(data.get("reply"), str):
         reply = data["reply"].strip()
 
+    # v3.0.0: файловые операции (file_move/file_copy/file_mkdir) — путь
+    # назначения и флаг «создать папку, если нет». Путь режется по лимиту;
+    # sandbox проверит fileops (только абсолютные внутри разрешённых корней).
+    path = ""
+    if isinstance(data.get("path"), str):
+        path = data["path"].strip()[:500]
+    create_dest = data.get("create_dest", True)
+    if not isinstance(create_dest, bool):
+        create_dest = bool(create_dest)
+
     return {
         "action": action,
         "doc_type": doc_type,
@@ -101,6 +114,8 @@ def _validate(raw: str, db: Session) -> dict[str, Any] | None:
         "file_ids": file_ids,
         "search_query": search_query,
         "reply": reply,
+        "path": path,
+        "create_dest": create_dest,
     }
 
 

@@ -20,12 +20,15 @@ class ReporterAgent:
     def run(
         self, question: str, fragments: list[dict],
         context: str | None = None, catalog: str = "",
+        known_answers: str = "",
     ) -> str:
         """context — текст актуального контекста беседы (может быть пустым):
         учитывается, если вопрос ссылается на прошлые сообщения; факты
         по-прежнему только из фрагментов (DD-5). catalog — картотека файлов
         (services.intents.catalog_block): агент «знает», что загружено,
-        но фактами из неё ответ не наполняет."""
+        но фактами из неё ответ не наполняет. known_answers (v3.0.0) —
+        блок проверенных ответов из обратной связи (services.feedback):
+        репортер использует его как эталон на похожем вопросе."""
         if not fragments:
             return NO_DATA
         settings = load_settings()
@@ -38,6 +41,7 @@ class ReporterAgent:
         prompt = get_prompt(
             "reporter", question=question, fragments=frag_block,
             context=(context or "").strip(), catalog=(catalog or "").strip(),
+            known_answers=(known_answers or "").strip(),
         )
         try:
             answer = get_llm().chat(prompt, model=settings.llm.model_main)

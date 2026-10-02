@@ -19,6 +19,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from doc_agent.db.migrations import log_audit
 from doc_agent.db.models import Chunk, File, Job
 from doc_agent.db.session import get_session_factory
 from doc_agent.logging import get_logger
@@ -129,6 +130,11 @@ def stop_worker() -> None:
     log.info("jobs_worker_stopped")
 
 
+def worker_alive() -> bool:
+    """Жив ли поток-воркер очереди (v2.9.1, для админ-диагностики)."""
+    return _thread is not None and _thread.is_alive()
+
+
 def enqueue_reindex(file_id: int) -> int:
     factory = get_session_factory()
     with factory() as db:
@@ -136,6 +142,18 @@ def enqueue_reindex(file_id: int) -> int:
         db.add(job)
         db.commit()
         return int(job.id)
+
+
+def enqueue_reprocess_job(file_id: int, actor: str = "admin") -> int:
+    """Полная переобработка одного файла из оригинала (v3.0.0, админ-UI)."""
+    factory = get_session_factory()
+    with factory() as db:
+        job = Job(file_id=file_id, kind=f"reprocess:{file_id}", priority=1)
+        db.add(job)
+        db.commit()
+        job_id = int(job.id)
+    log_audit(actor, "file_reprocess_enqueued", {"file_id": file_id, "job_id": job_id})
+    return job_id
 
 
 def enqueue_reproduce(file_id: int, target_format: str) -> int:

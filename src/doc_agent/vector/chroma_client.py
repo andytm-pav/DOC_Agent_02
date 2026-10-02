@@ -23,6 +23,7 @@ class VectorStore(Protocol):
     def query(self, embedding: list[float], n: int = 20,
               file_ids: list[int] | None = None) -> list[dict]: ...
     def delete_file(self, file_id: int) -> None: ...
+    def delete_chunks(self, keys: list[str]) -> None: ...  # v3.0.0 (CRUD чанков)
     def healthy(self) -> bool: ...
     def count(self) -> int: ...
 
@@ -77,6 +78,10 @@ class ChromaVectorStore:
 
     def delete_file(self, file_id: int) -> None:
         self.collection.delete(where={"file_id": {"$eq": file_id}})  # type: ignore[arg-type,dict-item]
+
+    def delete_chunks(self, keys: list[str]) -> None:
+        if keys:
+            self.collection.delete(ids=keys)  # type: ignore[arg-type]
 
     def healthy(self) -> bool:
         try:
@@ -141,6 +146,12 @@ class LiteVectorStore:
         with self._lock:
             for cid in [k for k, v in self._data.items() if int(v["meta"].get("file_id", 0)) == file_id]:
                 del self._data[cid]
+            self._flush()
+
+    def delete_chunks(self, keys: list[str]) -> None:
+        with self._lock:
+            for k in keys:
+                self._data.pop(k, None)
             self._flush()
 
     def healthy(self) -> bool:
@@ -210,10 +221,9 @@ def vector_info() -> dict:
     name = getattr(collection, "name", None)
     if name is None and hasattr(store, "file"):
         name = store.file.stem
-    # v2.7.1/v2.9: dim — ожидаемая размерность ТЕКУЩЕГО backend (384 для
-    # hashing; embeddings.api.dimensions для api; embeddings.dimensions или
-    # фактическая у загруженной локальной модели для sentence_transformers;
-    # null, если размерность ещё неизвестна). Раньше всегда показывался 384.
+    # v2.7.1: dim — ожидаемая размерность ТЕКУЩЕГО backend (384 для
+    # hashing/e5; embeddings.api.dimensions для api; null, если размерность
+    # определит провайдер по умолчанию). Раньше всегда показывался 384.
     return {
         "backend": type(store).__name__,
         "count": store.count(),

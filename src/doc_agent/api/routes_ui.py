@@ -32,4 +32,10 @@ def login_page(request: Request) -> HTMLResponse:
 
 @router.get("/admin-ui", response_class=HTMLResponse)
 def admin_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "admin.html", {"title": "Админ — Документовед"})
+    cfg = load_settings()
+    # v2.9.1: панель «Прогресс эмбеддингинга» опрашивается с тем же
+    # интервалом из конфига, что и строка статуса (chat.status_poll_ms).
+    return templates.TemplateResponse(
+        request, "admin.html",
+        {"title": "Админ — Документовед", "status_poll_ms": cfg.chat.status_poll_ms},
+    )

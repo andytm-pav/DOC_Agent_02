@@ -41,6 +41,10 @@ def _make_base_config(data_dir: Path, llm_provider: str = "none",
         "auth": {"token_expire_minutes": 60,
                  "api_keys": [{"key": "test-api-key-user", "name": "external-system", "role": "user"},
                               {"key": "test-api-key-admin", "name": "external-admin", "role": "admin"}]},
+        # v3.0.0: users.yaml и файловые операции — всё в tmp-каталоге теста
+        "users": {"file": str(data_dir.parent / "users.yaml")},
+        "files": {"enabled": True, "allowed_roots": [str(data_dir.parent / "disk")], "max_move_mb": 100},
+        "feedback": {"enabled": True, "similarity_threshold": 0.80},
     }
     cfg_dir = data_dir.parent / "config"
     cfg_dir.mkdir(parents=True, exist_ok=True)

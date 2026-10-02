@@ -1,5 +1,14 @@
-"""Аутентификация: JWT (python-jose) + RBAC (admin | user) + API-ключи
-для доступа из внешних систем (config: auth.api_keys, заголовок X-API-Key)."""
+"""Аутентификация: JWT (python-jose) + RBAC + API-ключи для внешних систем.
+
+v3.0.0: пользователи и ГРУППЫ живут в отдельном файле config/users.yaml
+(бэкап) — services/users_store.py. Права пользователя = объединение прав
+его групп; право "admin" даёт полный доступ (в том числе role=admin для
+require_admin). Права разрешаются при КАЖДОМ запросе (правки групп
+вступают в силу сразу, без перелогина). Обратная совместимость:
+пользователи SQLite переносятся в файл при первом старте/входе; если
+в файле пользователя нет — работает старая ролевая модель
+(admin | user). API-ключи config auth.api_keys — без изменений.
+"""
 from __future__ import annotations
 
 import json
@@ -13,17 +22,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from doc_agent.config import load_settings
-from doc_agent.db.migrations import verify_password
+from doc_agent.db.migrations import hash_password, verify_password
 from doc_agent.db.models import User
 from doc_agent.db.session import get_db
+from doc_agent.services import users_store
 
 _bearer = HTTPBearer(auto_error=False)
 
 
-def create_access_token(username: str, role: str) -> str:
+def create_access_token(username: str, role: str, groups: list[str] | None = None) -> str:
     s = load_settings()
     expire = datetime.now(timezone.utc) + timedelta(minutes=s.auth.token_expire_minutes)
     payload = {"sub": username, "role": role, "exp": expire}
+    if groups:
+        payload["groups"] = groups
     return jwt.encode(payload, s.app.secret_key, algorithm="HS256")
 
 
@@ -33,10 +45,22 @@ def decode_token(token: str) -> dict:
 
 
 def authenticate(db: Session, username: str, password: str) -> User | None:
-    user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
-    if user is None or not verify_password(password, user.password_hash):
+    """Логин: users.yaml (источник истины, v3.0.0) -> SQLite-фолбэк.
+
+    Успешный вход legacy-пользователя из SQLite прозрачно переносит его в
+    users.yaml (ensure_user) — файл постепенно становится полным списком.
+    """
+    user = users_store.verify_login(username, password)
+    if user is not None:
+        return user
+    db_user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
+    if db_user is None or not verify_password(password, db_user.password_hash):
         return None
-    return user
+    try:
+        users_store.ensure_user(db_user.username, db_user.password_hash, db_user.role)
+    except Exception:  # noqa: BLE001 — вход не должен ломаться от сбоя файла
+        pass
+    return db_user
 
 
 def _credentials_error(detail: str = "Не авторизован") -> HTTPException:
@@ -58,6 +82,13 @@ def match_api_key(provided: str) -> User | None:
         if entry.key and secrets.compare_digest(provided, entry.key.strip()):
             return User(id=0, username=f"api:{entry.name}", password_hash="", role=entry.role)
     return None
+
+
+def _resolve_user(username: str, token_role: str) -> User:
+    """Пользователь JWT с АКТУАЛЬНОЙ ролью: groups в users.yaml важнее
+    роли в токене (правки групп вступают в силу без перелогина)."""
+    role = users_store.role_for(username, token_role)
+    return User(id=0, username=username, password_hash="", role=role)
 
 
 def get_current_user(
@@ -88,8 +119,7 @@ def get_current_user(
         if user is not None:
             return user
         raise _credentials_error("Недействительный токен")
-    user = User(id=0, username=username, password_hash="", role=role)
-    return user
+    return _resolve_user(username, role)
 
 
 def get_current_user_optional(
@@ -126,5 +156,31 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def require_perm(perm: str):
+    """Зависимость FastAPI: конкретное право (v3.0.0).
+
+    Право "admin" включает всё. Права берутся из групп пользователя в
+    users.yaml при каждом запросе; для пользователей вне файла — старая
+    ролевая модель (admin -> всё, user -> chat/feedback_submit/files_view).
+    """
+
+    def _dep(user: User = Depends(get_current_user)) -> User:
+        if not users_store.has_permission(user.username, perm, user.role):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Не хватает прав ({perm}) — настройте группы в админ-вкладке «Пользователи»",
+            )
+        return user
+
+    return _dep
+
+
 def audit_payload(user: User) -> str:
     return json.dumps({"actor": user.username, "role": user.role}, ensure_ascii=False)
+
+
+# hash_password реэкспортируется для совместимости импортов (bcrypt-формат
+# одинаков для SQLite и users.yaml)
+__all__ = ["create_access_token", "decode_token", "authenticate", "match_api_key",
+           "get_current_user", "get_current_user_optional", "require_admin",
+           "require_perm", "audit_payload", "hash_password"]
