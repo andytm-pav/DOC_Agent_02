@@ -49,6 +49,48 @@ _retriever = RetrieverAgent()
 _reporter = ReporterAgent()
 _validator = ValidatorAgent()
 
+# v2.8: отказ как полноценная фича (не сбой): детерминированный ответ при
+# слабых сигналах ретрива — вместо передачи мусорных фрагментов в LLM
+# (именно мусор в промпте давал «повод» галлюцинировать). Текст честный:
+# данных нет, отвечать догадками агент не будет.
+REFUSAL_TEXT = (
+    "НЕТ ДАННЫХ. В загруженных документах информации по вашему запросу не "
+    "найдено — отвечать по догадкам не буду. Загрузите подходящие файлы или "
+    "переформулируйте запрос."
+)
+
+
+def _weak_retrieval(fragments: list[dict], stats: dict) -> bool:
+    """v2.8: сигналы ретрива слишком слабы для ответа (qa.refuse_*).
+
+    Отказ ТОЛЬКО когда ОБА сигнала ниже порогов: сильный хотя бы один
+    (семантический косинус или лексическое перекрытие) — отвечаем.
+    Если векторный бэкенд недоступен/пуст (best_vector_cosine = 0), гейт
+    вырождается в лексический — BM25-совпадения всё равно отвечают."""
+    s = load_settings().qa
+    if not s.refuse_enabled:
+        return False
+    best_vec = max(float(stats.get("best_vector_cosine") or 0.0), 0.0)
+    best_lex = max(float(stats.get("best_lexical") or 0.0),
+                   max((float(f.get("score") or 0.0) for f in fragments), default=0.0))
+    return best_vec < s.refuse_vector_below and best_lex < s.refuse_lexical_below
+
+
+def _refusal(question: str, db: Session, filters: dict) -> dict:
+    """Детерминированный отказ + подсказка похожих файлов картотеки."""
+    result: dict = {
+        "answer": REFUSAL_TEXT, "files": [], "confidence": 0.0,
+        "grounded": False, "partial": False, "filters": filters,
+        "intent": "refusal",
+    }
+    hint = no_data_hint(question, db)
+    if hint:
+        result["answer"] += "\n\n" + hint
+    log_audit("query", "query_answered", {
+        "q": question[:200], "intent": "refusal", "no_data": True, "files": [],
+    })
+    return result
+
 
 def _maybe_synthesize(question: str, res: dict) -> dict:
     """Обернуть детерминированные данные картотеки (список/подсчёт) в
@@ -162,7 +204,25 @@ def run_query(
         filters = extract_filters_from_query(
             question, prefill={"doc_type": plan.get("doc_type")} if plan else None)
         search_query = (plan or {}).get("search_query") or question
-        fragments, _candidates = _retriever.run(db, search_query, filters, limit=limit)
+        stats: dict = {}
+        fragments, _candidates = _retriever.run(db, search_query, filters, limit=limit,
+                                                stats=stats)
+
+        # 3.5 v2.8: ОТКАЗ КАК ФИЧА — ретрив не нашёл ничего осмысленного
+        #     (оба сигнала слабы): LLM не вызывается, честный отказ +
+        #     подсказка. Автодочтение по плану сохранено (могут найтись
+        #     файлы по названиям).
+        if _weak_retrieval(fragments, stats):
+            if (plan and (plan.get("file_ids") or plan.get("terms"))) or \
+                    load_settings().qa.deep_read_on_no_data:
+                deep = try_deep_read(
+                    question, db, require_cue=False,
+                    file_ids=(plan or {}).get("file_ids") or None,
+                    terms=(plan or {}).get("terms") or None,
+                )
+                if deep is not None:
+                    return deep
+            return _refusal(question, db, filters)
 
         # 4. reporter (LLM или экстрактивный); картотека — чтобы агент
         #    «знал», какие файлы вообще есть в картотеке

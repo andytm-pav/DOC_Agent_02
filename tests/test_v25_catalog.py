@@ -127,7 +127,8 @@ def test_find_show_all_ks2_not_contracts(client, admin_token, tmp_data_dir) -> N
 
     # «покажи все суммы по смете» — НЕ файловый вопрос -> обычный поиск
     res = _q(client, admin_token, "покажи все суммы по смете")
-    assert res.get("intent") is None
+    # v2.8: refusal-гейт даёт intent=refusal (старый RAG-путь — без intent)
+    assert res.get("intent") in (None, "refusal")
 
 
 def test_count_by_content_fallback(client, admin_token, tmp_data_dir) -> None:
@@ -152,15 +153,16 @@ def test_content_question_stays_no_data_but_hinted(client, admin_token, tmp_data
     import doc_agent.services.query as qmod
 
     class EmptyRetriever:
-        def run(self, db, question, filters, limit=20):  # noqa: ANN001, ARG002
+        def run(self, db, question, filters, limit=20, stats=None):  # noqa: ANN001, ARG002
             return [], []
 
     monkeypatch.setattr(qmod, "_retriever", EmptyRetriever())
 
     # несуществующий договор: без подсказки (совпадений с названиями нет)
     res = _q(client, admin_token, "Какая сумма по договору 999?")
-    assert res.get("intent") is None
-    assert res["answer"] == "НЕТ ДАННЫХ"
+    # v2.8: refusal-гейт даёт intent=refusal (старый RAG-путь — без intent)
+    assert res.get("intent") in (None, "refusal")
+    assert "НЕТ ДАННЫХ" in res["answer"]
 
     # вопрос указывает на конкретный файл — вместо голого «НЕТ ДАННЫХ»
     # приходит подсказка «прочитай файл …»
@@ -225,7 +227,7 @@ def test_deep_read_auto_after_no_data(client, admin_token, tmp_data_dir, monkeyp
             return "В смете один лист, итог 100000 руб. [file_id:%d]" % ids["Вилоновская_смета.txt"]
 
     class EmptyRetriever:
-        def run(self, db, question, filters, limit=20):  # noqa: ANN001, ARG002
+        def run(self, db, question, filters, limit=20, stats=None):  # noqa: ANN001, ARG002
             return [], []
 
     monkeypatch.setattr(dr, "load_settings", fake_load)

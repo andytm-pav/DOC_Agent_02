@@ -196,9 +196,18 @@ class RetrieverAgent:
                 return positive[:k]
         return fragments[:k]
 
-    def run(self, db: Session, query: str, filters: dict, limit: int = 20) -> tuple[list[dict], list[File]]:
-        """Возвращает (фрагменты top-K, файлы-кандидаты)."""
+    def run(self, db: Session, query: str, filters: dict,
+            limit: int = 20, stats: dict | None = None) -> tuple[list[dict], list[File]]:
+        """Возвращает (фрагменты top-K, файлы-кандидаты).
+
+        v2.8: stats (опциональный словарь) наполняется сигналами качества
+        ретрива для гейта отказа (qa.refuse_*):
+            best_vector_cosine — лучший косинус выживших векторных хитов;
+            best_lexical       — лучшее перекрытие после реранкера.
+        """
         s = load_settings().retrieval
+        if stats is not None:
+            stats.update({"best_vector_cosine": 0.0, "best_lexical": 0.0})
         candidates = self.sql_candidates(db, filters)
         if not candidates:
             return [], []
@@ -221,6 +230,8 @@ class RetrieverAgent:
 
         bm25_hits = self.bm25_top(chunks, query, limit)
         vec_hits = self.vector_top(chunks, query, limit)
+        if stats is not None and vec_hits:
+            stats["best_vector_cosine"] = max(s for _, s in vec_hits)
 
         bm25_rank = [str(cid) for cid, _ in bm25_hits]
         vec_rank = [str(cid) for cid, _ in vec_hits]
@@ -255,6 +266,8 @@ class RetrieverAgent:
                 "score": float(raw_score.get(cid, 0.0)),
             })
         top = self.rerank(query, fragments)
+        if stats is not None and top:
+            stats["best_lexical"] = max(float(f.get("score", 0.0)) for f in top)
         return top, candidates
 
     def run_metadata(self, db: Session, filters: dict) -> list[File]:

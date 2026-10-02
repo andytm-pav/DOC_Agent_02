@@ -1,7 +1,14 @@
 """Ingest-конвейер (раздел 8.1 ТЗ): dedup по sha256, извлечение, чанки,
-эмбеддинги, классификация, связи, статусы."""
+эмбеддинги, классификация, связи, статусы.
+
+v2.8 — контекстуальный ретрив (Anthropic, 2024; промышленно +18 п.п.
+recall@5 на вопросах-синтезах): в начало КАЖДОГО чанка перед эмбеддингом
+и индексацией добавляется контекст: имя документа (+лист), путь заголовков
+главы, однострочная заметка о том, чему посвящён документ. Смысл внутри
+чанка важнее арифметики размеров."""
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import shutil
@@ -13,6 +20,8 @@ from doc_agent.config import load_settings
 from doc_agent.db.migrations import log_audit
 from doc_agent.db.models import Chunk, File, FileLink, TableFlat
 from doc_agent.db.session import get_session_factory
+from doc_agent.llm.ollama_client import get_llm
+from doc_agent.llm.prompts import get_prompt
 from doc_agent.logging import get_logger
 from doc_agent.subagents.classifier_agent import ClassifierAgent
 from doc_agent.subagents.extractor_agent import ExtractorAgent
@@ -93,6 +102,111 @@ def _tree_has_unreadable(tree: dict) -> int:
     return int(tree.get("unreadable", 0) or 0)
 
 
+# ------------------- v2.8: контекстуальный ретрив -------------------
+
+
+def _walk_headings(tree: dict) -> list[dict]:
+    """Заголовки дерева документа в порядке следования (DFS)."""
+    out: list[dict] = []
+
+    def visit(node: dict, depth: int) -> None:
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "heading":
+            out.append({"level": int(node.get("level") or depth or 1),
+                        "text": str(node.get("text") or "").strip()})
+        for child in node.get("children") or []:
+            visit(child, depth + 1)
+
+    visit(tree, 0)
+    return out
+
+
+def heading_path_index(tree: dict, text: str) -> list[tuple[int, str]]:
+    """Позиции смены контекста заголовков в плоском тексте документа.
+
+    Возвращает [(char_pos, «Раздел 1 > Подраздел 2»), ...] по возрастанию
+    позиций: для каждого заголовка ищем его текст в документе (последовательно,
+    от предыдущего найденного) — так чанк по char_start получает путь
+    главы, в которой он находится. Заголовки, которых нет в плоском тексте
+    (например, названия листов), в индекс не попадают.
+    """
+    positions: list[tuple[int, str]] = []
+    stack: list[tuple[int, str]] = []  # (level, text) — текущая ветка главы
+    search_from = 0
+    for h in _walk_headings(tree):
+        level, htext = h["level"], h["text"]
+        if not htext:
+            continue
+        while stack and stack[-1][0] >= level:
+            stack.pop()
+        stack.append((level, htext))
+        pos = text.find(htext, search_from)
+        if pos < 0:
+            continue  # заголовка нет в плоском тексте — путь не привязать
+        search_from = pos + len(htext)
+        path = " > ".join(t for _, t in stack)
+        positions.append((pos, path))
+    positions.sort(key=lambda x: x[0])
+    return positions
+
+
+def _path_at(index: list[tuple[int, str]], char_start: int) -> str:
+    """Путь заголовков, действующий на позиции char_start (последний
+    заголовок, начавшийся не позже)."""
+    if not index:
+        return ""
+    pos = bisect.bisect_right([p for p, _ in index], char_start) - 1
+    return index[pos][1] if pos >= 0 else ""
+
+
+def doc_note(f: File, text: str) -> str:
+    """Однострочная заметка о документе (v2.8, chunking.context_note).
+
+    1 LLM-вызов на файл (model_light), промпт config/prompts/context_note.txt;
+    сбой/офлайн — детерминированный fallback из метаданных классификатора.
+    Результат виден и человеку (File.description)."""
+    s = load_settings()
+    ch = s.chunking
+    max_chars = max(ch.note_max_chars, 40)
+    if s.llm.provider != "none":
+        try:
+            prompt = get_prompt("context_note", filename=f.original_name,
+                                text=(text or "")[:3000], max_chars=str(max_chars))
+            note = get_llm().chat(prompt, model=s.llm.model_light).strip().splitlines()[0]
+            note = note.strip(" \"«»").rstrip(".")
+            if note:
+                return note[:max_chars]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("context_note_failed", file_id=f.id, error=str(exc))
+    # Детерминированный fallback: метаданные классификатора
+    parts = [f"Тип: {f.doc_type or 'other'}"]
+    for label, val in (("контрагент", f.customer), ("объект", f.city),
+                       ("договор", f.contract_no)):
+        if val:
+            parts.append(f"{label} {val}")
+    return "; ".join(parts)[:max_chars]
+
+
+def build_chunk_prefix(name: str, sheet: str | None, path: str, note: str,
+                       enabled: bool = True) -> str:
+    """Контекстная преамбула чанка: [имя | Лист: X | Раздел: Y | заметка].
+
+    Имя файла — ПЕРВЫМ элементом (совместимость с v2.6.1-v2.7: чанки
+    начинаются с «[<имя файла>»); отсутствующие элементы опускаются.
+    enabled=False (chunking.filename_prefix: false) — пустая преамбула."""
+    if not enabled:
+        return ""
+    parts = [name]
+    if sheet:
+        parts.append(f"Лист: {sheet}")
+    if path:
+        parts.append(f"Раздел: {path}")
+    if note:
+        parts.append(note)
+    return "[" + " | ".join(parts) + "] "
+
+
 def process_file(file_id: int) -> None:
     """Фоновые шаги 7-17 (8.1). Вызывается воркером jobs."""
     factory = get_session_factory()
@@ -163,7 +277,14 @@ def process_file(file_id: int) -> None:
             if not description_only and (result.text or "").strip():
                 page_spans = result.tree.get("meta", {}).get("page_spans")
                 ch = load_settings().chunking
-                prefix = f"[{f.original_name}] " if ch.filename_prefix else ""
+                # v2.8: контекстуальный ретрив — заметка о документе (1 LLM-
+                # вызов на файл) и путь заголовков главы для каждого чанка.
+                note = ""
+                if ch.context_note:
+                    note = doc_note(f, result.text or "")
+                    f.description = note  # заметка — и в карточке файла
+                h_index = (heading_path_index(result.tree, result.text or "")
+                           if (ch.headings_in_prefix and ch.filename_prefix) else [])
                 # v2.7: табличные форматы чанкуются ПО СТРОКАМ (chunk_lines):
                 # чанк не режет строку сметы посередине, в преамбуле каждого
                 # чанка — имя файла и лист, шапка колонок повторяется в
@@ -174,7 +295,9 @@ def process_file(file_id: int) -> None:
 
                     chunks = []
                     for sheet_name, header, body in table_text_blocks(result.tables):
-                        preamble = f"[{f.original_name} | Лист: {sheet_name}] " if prefix else ""
+                        preamble = build_chunk_prefix(
+                            f.original_name, sheet_name, "", note,
+                            enabled=ch.filename_prefix)
                         chunks.extend(
                             chunk_lines(body, preamble=preamble, header_line=header))
                 else:
@@ -184,9 +307,11 @@ def process_file(file_id: int) -> None:
                     # себе не содержат имени объекта/файла — без преамбулы
                     # BM25 и векторный поиск не связывают «вилоновская»
                     # со строками сметы.
-                    if prefix:
+                    if ch.filename_prefix:
                         for c in chunks:
-                            c["text"] = prefix + c["text"]
+                            path = _path_at(h_index, int(c.get("char_start") or 0))
+                            c["text"] = build_chunk_prefix(
+                                f.original_name, None, path, note) + c["text"]
                 embeddings = embed_passages([c["text"] for c in chunks])
                 for c, emb in zip(chunks, embeddings):
                     db.add(Chunk(

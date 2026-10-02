@@ -17,6 +17,7 @@ from doc_agent.db.session import db_file, get_db
 from doc_agent.logging import get_logger
 from doc_agent.services import sorting
 from doc_agent.vector.chroma_client import vector_degraded, vector_info
+from doc_agent.vector.embedder import resolve_backend
 
 log = get_logger("routes.admin")
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -142,7 +143,21 @@ def debug(db=Depends(get_db), user: User = Depends(require_admin)) -> dict:
             "model_light": s.llm.model_light, "api_key_set": bool(s.llm.api_key),
             "timeout_sec": s.llm.timeout_sec, "temperature": s.llm.temperature,
         },
-        "embeddings": {"backend": s.embeddings.backend, "model": s.embeddings.model},
+        "embeddings": {
+            "backend": s.embeddings.backend,
+            "resolved_backend": resolve_backend(),
+            "model": s.embeddings.model,
+            # v2.9: параметры ЛОКАЛЬНОЙ модели (backend: sentence_transformers)
+            "device": s.embeddings.device or "auto",
+            "local_dimensions": s.embeddings.dimensions or "auto (из модели)",
+            "query_prefix": s.embeddings.query_prefix or "—",
+            "api_model": s.embeddings.api.model,
+            # v2.7.1: видно, куда реально пойдут эмбеддинги и какая
+            # размерность (пустые base_url/api_key = наследование из llm).
+            "api_base_url": s.embeddings.api.base_url or f"{s.llm.base_url} (из llm)",
+            "api_key_set": bool(s.embeddings.api.api_key or s.llm.api_key),
+            "dimensions": s.embeddings.api.dimensions or "auto",
+        },
         "vector": vector_info(),
         "vector_degraded": vector_degraded(),
         "database": {

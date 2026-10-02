@@ -194,6 +194,14 @@ qa:
   deep_read_min_terms: 2
   deep_read_on_no_data: true    # автодочтение после «НЕТ ДАННЫХ» поиска
   deep_read_confidence: 0.9
+  # --- v2.8: ОТКАЗ КАК ПОЛНОЦЕННАЯ ФИЧА (анти-галлюцинация) ---
+  # Если ретрив вернул только слабые сигналы (векторный косинус НИЖЕ
+  # refuse_vector_below И лексическое перекрытие НИЖЕ refuse_lexical_below),
+  # LLM не вызывается вовсе: детерминированный отказ «информации не найдено»
+  # + подсказка похожих файлов. Сильный хотя бы один сигнал — отвечаем.
+  refuse_enabled: true
+  refuse_vector_below: 0.35     # лучший косинус выживших векторных хитов (0..1)
+  refuse_lexical_below: 0.12    # доля термов запроса в лучшем фрагменте (0..1)
 
 watchdog:
   enabled: false
@@ -215,6 +223,10 @@ llm:
   api_path: "/chat/completions"           # финальный URL = base_url + api_path
   model_main: "gpt-4o-mini"               # классификация/отчёты
   model_light: "gpt-4o-mini"              # вспомогательные задачи
+  # v2.8: ретраи при rate-limit (429)/5xx (бесплатный glm-4.5-flash малыми
+  # RPM). Ждём Retry-After провайдера, иначе backoff_sec * 2^попытка.
+  rate_limit_retries: 2
+  rate_limit_backoff_sec: 2.0
   timeout_sec: 60
   temperature: 0.0
   # Доп. поля тела запроса к API (передаются как есть). Для reasoning-моделей
@@ -224,18 +236,52 @@ llm:
   extra_body: {}
 
 embeddings:
-  # backend: auto (v2.7, рекомендуется) — api, если доступен ключ/base_url
-  #          (llm.* или embeddings.api.*), иначе hashing. Настоящая семантика
-  #          там, где она возможна: hashing — это НЕ смысловая модель, а
-  #          лексическое совпадение токенов (одна из причин мусорной выдачи
-  #          в v2.6 и раньше);
-  #          hashing — офлайн, без загрузки моделей (384 dims);
-  #          api — НАСТОЯЩИЕ эмбеддинги через OpenAI-совместимый /embeddings
-  #          ТОГО ЖЕ провайдера, что и llm (base_url/api_key наследуются);
-  #          sentence_transformers — локальная модель из поля model (extras [ml])
-  backend: auto
+  # backend (v2.7/v2.9):
+  #   auto                 — api, если доступен ключ/base_url (llm.* или
+  #                          embeddings.api.*), иначе hashing. Рекомендуется,
+  #                          если хотите эмбеддинги ПО КЛЮЧУ.
+  #   sentence_transformers — ЛОКАЛЬНАЯ модель, БЕЗ ключа и БЕЗ интернета
+  #                          (после первого скачивания). Требует
+  #                          pip install -e ".[ml]" (тянет torch, ~2 ГБ).
+  #                          Подробный рецепт — README, раздел
+  #                          «Локальные эмбеддинги».
+  #   hashing              — офлайн без загрузок, но ЭТО НЕ СЕМАНТИКА,
+  #                          а лексическое совпадение токенов (последний
+  #                          рубеж, когда ничего другого нет);
+  #   api                  — НАСТОЯЩИЕ эмбеддинги через OpenAI-совместимый
+  #                          /embeddings (base_url/api_key — из embeddings.api
+  #                          или наследуются из llm).
+  # ВНИМАНИЕ (v2.8, проверено запросами): у МЕЖДУНАРОДНОГО api.z.ai НЕТ
+  #    эмбеддингов (в API-docs docs.z.ai только chat/agents/image/video);
+  #    запрос /embeddings с моделью embedding-3 даёт 400. Эмбеддинги Zhipu
+  #    живут на open.bigmodel.cn (см. гибрид ниже) или ЛОКАЛЬНО:
+  #    backend: sentence_transformers (e5-small, без ключа и интернета)
+  #    или локальный Ollama: base_url "http://localhost:11434/v1",
+  #    model: "bge-m3" (1024 dims, ollama pull bge-m3).
+  backend: sentence_transformers
+  # --- ЛОКАЛЬНАЯ МОДЕЛЬ (backend: sentence_transformers), v2.9 ---
+  # Любой каталог Hugging Face. Дефолт intfloat/multilingual-e5-small:
+  # 384 dims, ~120 МБ, на CPU ~6 чанков/с даже на 2 старых ядрах
+  # (на офисном ПК в разы быстрее; вопрос в чате — ~20 мс).
+  # Тяжелее/качественнее: BAAI/bge-m3 (1024 dims, ~2.3 ГБ, на CPU в
+  # 5-8 раз медленнее e5-small).
+  # Первый запуск СКАЧИВАЕТ модель с huggingface.co, дальше — офлайн.
+  # Медленная сеть: перед запуском задайте переменную окружения
+  # HF_ENDPOINT=https://hf-mirror.com (зеркало HF).
   model: "intfloat/multilingual-e5-small"
-  batch_size: 32
+  batch_size: 32               # чанков за один прогон (и для api, и для локальной)
+  # Устройство локальной модели: "" = авто (CUDA, если есть, иначе CPU);
+  # "cpu" — принудительно CPU; "cuda" — только при установленном CUDA-torch.
+  device: ""
+  # Размерность локальной модели: 0 = взять фактическую после загрузки
+  # (e5-small = 384, bge-m3 = 1024). Смена = новое векторное пространство =
+  # новая коллекция (авто при vector.auto_collection_suffix: true).
+  dimensions: 0
+  # E5-моделям обязательны префиксы "query: "/"passage: " (без них
+  # качество поиска падает). Другим локальным моделям (bge-m3,
+  # paraphrase-*) префиксы НЕ нужны — поставьте "".
+  query_prefix: "query: "
+  passage_prefix: "passage: "
   # v2.7: морфология (Snowball ru) для лексических механизмов — BM25,
   # реранкер, hashing-эмбеддинги, grounding. Без неё «вилоновской» не
   # находил «Вилоновская», а «материалов» — «материал». Для api/
@@ -248,6 +294,27 @@ embeddings:
     api_key: ""                # пусто = llm.api_key
     api_path: "/embeddings"
     timeout_sec: 60
+    # Кастомная размерность (v2.7.1). Zhipu embedding-3: 256/512/1024/2048
+    # (0 = дефолт провайдера, 2048). OpenAI text-embedding-3-small: 512/1536.
+    # 1024 — разумный баланс качества и скорости для русского текста.
+    # Смена значения = новое векторное пространство = переиндексация
+    # (коллекция подберётся сама при vector.auto_collection_suffix: true).
+    dimensions: 0
+    # v2.8: ретраи при 429 (rate-limit) от эмбеддинг-API.
+    rate_limit_retries: 2
+    rate_limit_backoff_sec: 2.0
+  # v2.7.1, ГИБРИД (LLM и эмбеддинги у РАЗНЫХ провайдеров): заполните
+  # base_url И api_key здесь ПОЛНОСТЬЮ — тогда секция llm на эмбеддинги
+  # не влияет. Пример: эмбеддинги через open.bigmodel.cn (ключ Zhipu),
+  # а LLM — где угодно:
+  #   api:
+  #     model: "embedding-3"
+  #     base_url: "https://open.bigmodel.cn/api/paas/v4"
+  #     api_key: "${EMBEDDING_API_KEY}"  # СВОЯ переменная из .env (ключ
+  #                                      # bigmodel.cn НЕ равен ключу z.ai)
+  #     dimensions: 1024
+  # (если эмбеддинг-провайдер совпадает с LLM — оставьте api_key: ""
+  #  здесь и ничего в .env добавлять не нужно)
   # ВАЖНО: при vector.auto_collection_suffix: true (см. ниже) коллекция
   # подбирается автоматически (суффикс backend-модели) — старые векторы не
   # смешиваются с новыми. Если выключите суффикс — меняйте vector.collection
@@ -308,6 +375,17 @@ chunking:
   table_header_in_chunk: true
   # Форматы, обрабатываемые табличным чанкингом (по листам/строкам)
   table_formats: [xlsx, xlsm, csv]
+  # --- v2.8: КОНТЕКСТУАЛЬНЫЕ ПРЕАМБУЛЫ (Contextual Retrieval, Anthropic
+  # 2024; промышленно +18 п.п. recall@5 на вопросах-синтезах) ---
+  # В начало каждого чанка перед эмбеддингом и индексацией добавляется:
+  # [имя файла | Лист: X | Раздел: Y > Z | однострочная заметка о документе].
+  # Однострочная заметка: 1 LLM-вызов на файл (model_light), кэшируется
+  # в описании файла; сбой/офлайн — fallback из метаданных классификатора.
+  # Путь заголовков строится по дереву документа без LLM.
+  # После включения/смены настроек нужна переиндексация.
+  context_note: true
+  note_max_chars: 160
+  headings_in_prefix: true
 
 ocr:
   # engine: tesseract | paddle | none

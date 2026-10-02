@@ -221,7 +221,7 @@ def test_planner_search_content_uses_query_and_filters(client, admin_token,
     captured: dict = {}
 
     class FakeRetriever:
-        def run(self, db, question, filters, limit=20):  # noqa: ANN001, ARG002
+        def run(self, db, question, filters, limit=20, stats=None):  # noqa: ANN001, ARG002
             captured["question"] = question
             captured["filters"] = filters
             return [{
@@ -338,6 +338,9 @@ def test_api_embeddings_backend(monkeypatch) -> None:
     class FakeResp:
         def __init__(self, n: int) -> None:
             self.n = n
+            self.status_code = 200
+            self.text = ""
+            self.headers = {}
 
         def raise_for_status(self) -> None:
             pass

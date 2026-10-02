@@ -223,6 +223,21 @@ class QaSettings(BaseModel):
     deep_read_min_terms: int = 2
     deep_read_on_no_data: bool = True
     deep_read_confidence: float = 0.9
+    # --- v2.8: ОТКАЗ КАК ПОЛНОЦЕННАЯ ФИЧА (анти-галлюцинация) ---
+    # Если ретрив вернул только слабые сигналы (лучший векторный косинус
+    # НИЖЕ refuse_vector_below И лучшее лексическое перекрытие НИЖЕ
+    # refuse_lexical_below) — LLM не вызывается вовсе: детерминированный
+    # отказ «в документах информации не найдено» + подсказка похожих
+    # файлов. Раньше мусорные фрагменты шли в промпт и давали «повод»
+    # выдумывать. Отказ включается, только ОБА сигнала слабы: сильный
+    # хотя бы один (семантика или лексика) — отвечаем.
+    refuse_enabled: bool = True
+    # Косинусная похожесть лучших выживших векторных хитов (0..1).
+    # 0.35 — уверенный минимум для осмысленной семантической связи.
+    refuse_vector_below: float = 0.35
+    # Доля термов запроса, найденных в лучшем фрагменте после реранкера
+    # (0..1). 0.12 — хотя бы ~1 терм из 8 должен быть в тексте.
+    refuse_lexical_below: float = 0.12
 
 
 class PlannerSettings(BaseModel):
@@ -270,6 +285,11 @@ class LLMSettings(BaseModel):
     model_light: str = "gemma2:2b-instruct-q4_K_M"
     timeout_sec: float = 60.0
     temperature: float = 0.0
+    # v2.8: ретраи при rate-limit (429) и 5xx — бесплатный tier glm-4.5-flash
+    # малыми RPM: очередь ингеста валит классификатор 429-ми. Ждём
+    # Retry-After, если провайдер отдал, иначе backoff_sec * 2^попытка.
+    rate_limit_retries: int = 2
+    rate_limit_backoff_sec: float = 2.0
     # Доп. поля тела запроса к OpenAI-совместимому API (передаются как есть).
     # Пример для reasoning-моделей Zhipu/Z.ai (glm-4.5*, glm-4.6):
     #   {"thinking": {"type": "disabled"}} — быстрее и без <think> в ответе.
@@ -290,6 +310,15 @@ class EmbeddingApiSettings(BaseModel):
     api_key: str = ""                # пусто = llm.api_key
     api_path: str = "/embeddings"
     timeout_sec: float = 60.0
+    # Кастомная размерность (v2.7.1): Zhipu embedding-3 принимает 256/512/
+    # 1024/2048 (дефолт 2048); OpenAI text-embedding-3-small — 512/1536.
+    # 0 = параметр НЕ передаётся (дефолт провайдера). Смена значения меняет
+    # векторное пространство -> требуется переиндексация (коллекция
+    # подбирается автоматически при vector.auto_collection_suffix: true).
+    dimensions: int = 0
+    # v2.8: ретраи при 429 (rate-limit) от эмбеддинг-API.
+    rate_limit_retries: int = 2
+    rate_limit_backoff_sec: float = 2.0
 
 
 class EmbeddingsSettings(BaseModel):
@@ -306,6 +335,26 @@ class EmbeddingsSettings(BaseModel):
     # После включения/выключения нужна переиндексация (векторный пейсмаж
     # меняется при hashing-бэкенде).
     stem_lexical: bool = True
+    # --- v2.9: ЛОКАЛЬНАЯ МОДЕЛЬ (backend: sentence_transformers) ---
+    # Поля device/dimensions/query_prefix/passage_prefix применяются
+    # ТОЛЬКО к локальному бэкенду (api/hashing их игнорируют).
+    # Модель качается с huggingface.co при ПЕРВОМ старте (e5-small ~470 МБ),
+    # далее живёт в кэше HF и работает офлайн. Медленная сеть — переменная
+    # окружения HF_ENDPOINT=https://hf-mirror.com перед запуском.
+    # Устройство вычисления: "" = авто (CUDA, если доступна, иначе CPU);
+    # "cpu" — принудительно CPU; "cuda" — при установленном CUDA-torch.
+    device: str = ""
+    # Переопределение размерности локальной модели: 0 = взять фактическую
+    # из модели после загрузки (e5-small = 384, bge-m3 = 1024). Задайте,
+    # если хотите видеть dim в диагностике до первого запуска. Смена
+    # значения = новое векторное пространство = новая коллекция (авто
+    # при vector.auto_collection_suffix: true).
+    dimensions: int = 0
+    # E5-модели требуют префиксов "query: "/"passage: " — без них качество
+    # поиска заметно падает. Другим локальным моделям (BAAI/bge-m3,
+    # paraphrase-multilingual-*) префиксы не нужны: поставьте "".
+    query_prefix: str = "query: "
+    passage_prefix: str = "passage: "
     # backend: api — настоящий эмбеддинг по API (v2.6), без отдельного ключа:
     # наследует base_url/api_key секции llm, если не переопределено тут.
     api: EmbeddingApiSettings = Field(default_factory=EmbeddingApiSettings)
@@ -375,6 +424,21 @@ class ChunkingSettings(BaseModel):
     table_header_in_chunk: bool = True
     # Форматы, обрабатываемые табличным чанкингом (по строкам/листам).
     table_formats: list[str] = Field(default_factory=lambda: ["xlsx", "xlsm", "csv"])
+    # --- v2.8: КОНТЕКСТУАЛЬНЫЕ ПРЕАМБУЛЫ (Contextual Retrieval, Anthropic
+    # 2024; промышленно даёт +18 п.п. recall@5 на вопросах-синтезах) ---
+    # В начало КАЖДОГО чанка перед эмбеддингом и индексацией добавляется
+    # контекст: имя документа (+лист), путь заголовков главы, однострочная
+    # заметка о том, чему посвящён документ. Смысл внутри чанка важнее
+    # арифметики размеров.
+    # Однострочная заметка о документе: 1 LLM-вызов на файл (model_light),
+    # результат кэшируется в File.description. При llm.provider: none или
+    # сбое — детерминированный fallback из метаданных классификатора.
+    context_note: bool = True
+    # Максимальная длина заметки (символы).
+    note_max_chars: int = 160
+    # Путь заголовков главы («Смета > Материалы») в преамбуле чанков:
+    # строится по дереву документа (extractor) без LLM.
+    headings_in_prefix: bool = True
 
 
 class OcrSettings(BaseModel):

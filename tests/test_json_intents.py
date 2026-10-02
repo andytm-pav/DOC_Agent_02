@@ -189,4 +189,4 @@ def test_intents_list_files_and_help(client, admin_token, tmp_data_dir) -> None:
 
     # обычный вопрос по-прежнему идёт через RAG (файлов с договором 999 нет)
     res = _q(client, admin_token, "Какая сумма по договору 999?")
-    assert res["answer"] == "НЕТ ДАННЫХ"
+    assert "НЕТ ДАННЫХ" in res["answer"]

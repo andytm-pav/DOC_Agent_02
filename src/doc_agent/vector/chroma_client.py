@@ -13,7 +13,6 @@ from typing import Any, Protocol
 
 from doc_agent.config import load_settings
 from doc_agent.logging import get_logger
-from doc_agent.vector.embedder import DIM
 
 log = get_logger("vector.store")
 
@@ -205,16 +204,20 @@ def make_chunk_key(file_id: int, chunk_index: int) -> str:
 
 def vector_info() -> dict:
     store = get_vector_store()
-    from doc_agent.vector.embedder import resolve_backend
+    from doc_agent.vector.embedder import expected_dim, resolve_backend
 
     collection = getattr(store, "collection", None)
     name = getattr(collection, "name", None)
     if name is None and hasattr(store, "file"):
         name = store.file.stem
+    # v2.7.1/v2.9: dim — ожидаемая размерность ТЕКУЩЕГО backend (384 для
+    # hashing; embeddings.api.dimensions для api; embeddings.dimensions или
+    # фактическая у загруженной локальной модели для sentence_transformers;
+    # null, если размерность ещё неизвестна). Раньше всегда показывался 384.
     return {
         "backend": type(store).__name__,
         "count": store.count(),
-        "dim": DIM,
+        "dim": expected_dim(),
         "embeddings": resolve_backend(),
         "collection": name,
     }
