@@ -174,5 +174,5 @@ def test_llm_summary_path(monkeypatch):
         chat_service.ChatMessage(user="admin", role="user", content="Покажи КС2"),
         chat_service.ChatMessage(user="admin", role="agent", content="Ответ"),
     ]
-    title, summary = chat_service._llm_summary(msgs)  # type: ignore[arg-type]
+    title, summary = chat_service._llm_summary(msgs)  # type: ignore[arg-type,misc]
     assert title == "Загрузка КС2" and "КС-2" in summary

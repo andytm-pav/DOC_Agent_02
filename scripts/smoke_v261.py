@@ -176,17 +176,6 @@ def _summary_rows() -> list[list[object]]:
     ]
 
 
-def _summary_rows() -> list[list[object]]:
-    """Сводная смета — ДРУГОЕ содержимое (иначе sha256-дедуп склеит файлы)."""
-    return [
-        ["Сводная смета по объекту Вилоновская 23", "", ""],
-        ["№", "Раздел", "Сумма"],
-        [1, "Работы", 672103.3],
-        [2, "Материалы", 98880],
-        [3, "Итого по смете", 770983.3],
-    ]
-
-
 def main() -> int:
     from openpyxl import Workbook
 
@@ -286,10 +275,11 @@ def main() -> int:
         deadline = time.time() + 30
         done = False
         while time.time() < deadline:
-            jobs = api("GET", "/admin/jobs", tok).get("jobs") or []
-            row = next((j for j in jobs if j["kind"] == "reindex_all"), None)
-            if row and row["status"] in {"done", "failed"}:
-                done = row["status"] == "done"
+            jobs_raw = api("GET", "/admin/jobs", tok).get("jobs") or []
+            jobs: list[dict] = list(jobs_raw)
+            job_row: dict | None = next((j for j in jobs if j["kind"] == "reindex_all"), None)
+            if job_row and job_row["status"] in {"done", "failed"}:
+                done = job_row["status"] == "done"
                 break
             time.sleep(0.4)
         check("reindex_all выполнен", done)

@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 from doc_agent.config import load_settings
 
@@ -103,10 +104,12 @@ def _enable_planner(monkeypatch, planner_reply: str | object,
     pll = PlannerLLM()
     monkeypatch.setattr(pl, "get_llm", lambda: pll)
     if synthesis_reply is not None:
+        reply: str = synthesis_reply  # сужение типа до вложенного класса
+
         class SynthLLM:
             def chat(self, prompt: str, model: str | None = None,
                      timeout: float | None = None) -> str:
-                return synthesis_reply
+                return reply
 
         monkeypatch.setattr(qmod, "get_llm", lambda: SynthLLM())
     return pll
@@ -340,14 +343,14 @@ def test_api_embeddings_backend(monkeypatch) -> None:
             self.n = n
             self.status_code = 200
             self.text = ""
-            self.headers = {}
+            self.headers: dict[str, str] = {}
 
         def raise_for_status(self) -> None:
             pass
 
         def json(self) -> dict:
             # индексами перемешаны специально: порядок восстанавливается
-            pairs = [[0, [0.1, 0.2]], [1, [0.3, 0.4]]][: self.n]
+            pairs: list[list[Any]] = [[0, [0.1, 0.2]], [1, [0.3, 0.4]]][: self.n]
             data = [{"index": i, "embedding": v} for i, v in
                     sorted(pairs, key=lambda p: -p[0])]
             return {"data": data}

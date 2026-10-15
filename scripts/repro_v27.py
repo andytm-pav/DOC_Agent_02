@@ -62,7 +62,7 @@ def make_docx(path: Path, paragraphs: list[str]) -> None:
     d = docx.Document()
     for p in paragraphs:
         d.add_paragraph(p)
-    d.save(path)
+    d.save(str(path))
 
 
 inbox = tmp / "inbox"

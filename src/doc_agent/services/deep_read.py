@@ -15,6 +15,14 @@
 после «НЕТ ДАННЫХ» (deep_read_on_no_data); с v2.6 — прямое указание
 планировщика (action=read_file).
 
+v3.0.3: ответ глубокого чтения проходит ТОТ ЖЕ grounding-фильтр
+(groundrails.validate_answer), что и RAG-ответ: корпус проверки — тексты
+файлов, ушедшие в промпт. Раньше deep_read был единственным LLM-путём
+без анти-галлюцинации: выдуманная «сводка» по целому файлу уходила
+пользователю без проверки. Полностью неподтверждённый ответ -> None
+(вопрос идёт в обычный RAG-путь), частично — вырезанное + partial=True
+и уверенность, пропорциональная доле уцелевшего.
+
 Без LLM (provider: none) — None: работает экстрактивный путь репортера.
 Промпт — config/prompts/deep_read.txt (инлайн-промпты запрещены).
 """
@@ -31,6 +39,7 @@ from doc_agent.db.models import Chunk, File
 from doc_agent.llm.ollama_client import get_llm
 from doc_agent.llm.prompts import get_prompt
 from doc_agent.logging import get_logger
+from doc_agent.services.groundrails import validate_answer
 from doc_agent.services.intents import (
     _load_files,
     _payload,
@@ -44,39 +53,52 @@ if TYPE_CHECKING:
 log = get_logger("services.deep_read")
 
 
+def _stitch(full: str, max_chars: int) -> str:
+    """v3.0.1: голова+хвост вместо обрезки только по голове.
+
+    Раньше длинный файл резался с начала: у больших договоров терялся
+    КОНЕЦ — а там реквизиты, подписи, гарантийные условия, приложения.
+    Теперь при нехватке бюджета берётся начало (~65%) + конец (~35%)
+    с честной пометкой о пропущенной середине (фабрика промптов
+    сохраняет структуру, LLM видит, что текст неполон)."""
+    if max_chars <= 0 or len(full) <= max_chars:
+        return full
+    marker_len = 60
+    head = max(0, max_chars * 65 // 100)
+    tail = max(0, max_chars - head - marker_len)
+    skipped = len(full) - head - tail
+    marker = f"\n[…пропущено ~{skipped} символов середины файла; конец документа ниже…]\n"
+    return full[:head] + marker + (full[-tail:] if tail > 0 else "")
+
+
 def _file_text(db: Session, file_id: int, max_chars: int) -> str:
-    """Полный текст файла из чанков (по порядку), обрезанный до max_chars."""
-    parts: list[str] = []
-    total = 0
+    """Текст файла из чанков (по порядку), уложенный в max_chars.
+    v3.0.1: переполнение сворачивается в голову+хвост (_stitch), а не
+    в обрезку с начала — большие документы сохраняют концовку."""
+    texts: list[str] = []
     rows = db.execute(
         select(Chunk.text).where(Chunk.file_id == file_id).order_by(Chunk.chunk_index)
     ).yield_per(200)
     for (text,) in rows:
-        t = text or ""
-        if total + len(t) <= max_chars:
-            parts.append(t)
-            total += len(t)
-        else:
-            rest = max_chars - total
-            if rest > 0:
-                parts.append(t[:rest])
-                total += rest
-            break
-        if total >= max_chars:
-            break
-    return "\n".join(parts)
+        texts.append(text or "")
+    return _stitch("\n".join(texts), max_chars)
 
 
-def _documents_block(db: Session, files: list, s: QaSettings) -> str:
-    """Блок «Документы» для промпта: заголовок файла + его полный текст."""
+def _documents_block(db: Session, files: list, s: QaSettings) -> tuple[str, list[str]]:
+    """Блок «Документы» для промпта: заголовок файла + его полный текст.
+
+    v3.0.3: возвращает также тексты по файлам — они становятся корпусом
+    grounding-валидации ответа (анти-галлюцинация наравне с RAG-путём)."""
     per_file = max(500, s.deep_read_max_chars // max(len(files), 1))
     blocks: list[str] = []
+    texts: list[str] = []
     for f in files:
         text = _file_text(db, f.id, per_file)
         if not text.strip():
             continue
         blocks.append(f"[file_id:{f.id}] {f.original_name}:\n{text}")
-    return "\n\n".join(blocks)
+        texts.append(text)
+    return "\n\n".join(blocks), texts
 
 
 def try_deep_read(
@@ -117,7 +139,7 @@ def try_deep_read(
     if not files:
         return None
 
-    documents = _documents_block(db, files, s)
+    documents, doc_texts = _documents_block(db, files, s)
     if not documents.strip():
         return None
 
@@ -130,18 +152,36 @@ def try_deep_read(
     if not answer:
         return None
 
+    # v3.0.3: grounding-фильтр (тот же, что у RAG-ответа); корпус — тексты
+    # файлов из промпта, поэтому всё, что LLM реально видела, проходит.
+    frags = [
+        {"file_id": f.id, "file_name": f.original_name,
+         "doc_type": f.doc_type or "other", "text": t}
+        for f, t in zip(files, doc_texts)
+    ]
+    validated = validate_answer(answer, frags)
+    validated_answer = str(validated.get("answer", "")).strip()
+    if not validated_answer or validated_answer == "НЕТ ДАННЫХ":
+        # выдумка целиком: механизм «не ответил» — вопрос уйдёт в RAG-путь
+        log.warning("deep_read_answer_ungrounded", files=[f.id for f in files])
+        return None
+    cut = float(validated.get("cut_ratio", 0.0))
+
     log_audit("query", "query_answered", {
         "q": question[:200], "intent": "deep_read",
         "files": [f.id for f in files],
         "cue": cue,
     })
-    log.info("deep_read_done", files=[f.id for f in files], chars=len(documents), cue=cue)
+    log.info("deep_read_done", files=[f.id for f in files], chars=len(documents), cue=cue,
+             cut_ratio=round(cut, 3))
     return {
-        "answer": answer,
+        "answer": validated_answer,
         "files": [_payload(f) for f in files],
-        "confidence": s.deep_read_confidence,
-        "grounded": True,
-        "partial": False,
+        # уверенность пропорциональна доле уцелевших утверждений
+        # (cut_ratio=0 -> прежнее значение deep_read_confidence)
+        "confidence": round(max(0.0, s.deep_read_confidence) * (1.0 - cut), 2),
+        "grounded": bool(validated.get("grounded")),
+        "partial": bool(validated.get("partial")),
         "filters": {},
         "intent": "deep_read",
     }

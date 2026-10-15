@@ -56,10 +56,12 @@ def _enable_planner(monkeypatch, planner_reply: str | object,
     pll = PlannerLLM()
     monkeypatch.setattr(pl, "get_llm", lambda: pll)
     if synthesis_reply is not None:
+        reply: str = synthesis_reply  # сужение типа до вложенного класса
+
         class SynthLLM:
             def chat(self, prompt: str, model: str | None = None,
                      timeout: float | None = None) -> str:
-                return synthesis_reply
+                return reply
 
         monkeypatch.setattr(qmod, "get_llm", lambda: SynthLLM())
     return pll

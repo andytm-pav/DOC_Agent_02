@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc-agent"
-version = "3.0.0"
+version = "3.0.3"
 description = "Локальный ИИ-агент «Документовед» — картотека документов, поиск с grounding, воспроизведение, A2A"
 requires-python = ">=3.11"
 readme = "README.md"
@@ -76,7 +76,7 @@ where = ["src"]
 line-length = 110
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = ["src/doc_agent/vendor"]  # вендоренный snowballstemmer (генерированный код)
+extend-exclude = ["src/doc_agent/vendor", ".venv*"]  # вендоренный snowballstemmer (генерированный код); venv'ы не линтуем
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
@@ -87,7 +87,11 @@ python_version = "3.12"
 ignore_missing_imports = true
 check_untyped_defs = true
 warn_unused_ignores = false
-exclude = ["build", "data", "plugins", "src/doc_agent/vendor"]
+exclude = ["build", "data", "plugins", "src/doc_agent/vendor", ".venv*"]
+# v3.0.3: conftest импортируется и как «conftest», и как «tests.conftest» —
+# без явных пакетных баз mypy падал «Source file found twice»
+explicit_package_bases = true
+mypy_path = "src"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

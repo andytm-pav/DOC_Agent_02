@@ -46,12 +46,17 @@ class OllamaClient:
 
     def chat(self, prompt: str, model: str | None = None, timeout: float | None = None) -> str:
         url = self.s.base_url.rstrip("/") + "/api/chat"
-        payload = {
+        # v3.0.1: аннотация Any-значений (мультипровайдерный payload)
+        payload: dict[str, Any] = {
             "model": model or self.s.model_main,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
             "options": {"temperature": self.s.temperature},
         }
+        # v3.0.1: настраиваемый лимит токенов ответа (llm.max_tokens;
+        # 0 = не отправлять — действует лимит провайдера)
+        if self.s.max_tokens and self.s.max_tokens > 0:
+            payload["options"]["num_predict"] = self.s.max_tokens
         r = httpx.post(url, json=payload, timeout=timeout or self.s.timeout_sec)
         r.raise_for_status()
         data = r.json()
@@ -80,6 +85,11 @@ class OpenAICompatible:
             "temperature": self.s.temperature,
             "stream": False,
         }
+        # v3.0.1: настраиваемый лимит токенов ответа (llm.max_tokens;
+        # 0 = не отправлять — действует лимит провайдера; дефолт части
+        # провайдеров мал, длинные ответы по документам обрезались)
+        if self.s.max_tokens and self.s.max_tokens > 0:
+            payload["max_tokens"] = self.s.max_tokens
         # Доп. поля API из конфига (llm.extra_body) — например, отключение
         # «размышлений» у reasoning-моделей Zhipu/Z.ai:
         #   extra_body: {"thinking": {"type": "disabled"}}

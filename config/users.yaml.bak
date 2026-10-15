@@ -1,6 +1,6 @@
 users:
 - username: admin
-  password_hash: $2b$12$MNaleHkP.UOOSBSV/4k47.em1hN3XcWiNEPoXryhQ9vBf3V0HCqGS
+  password_hash: $2b$12$OEyIgznUTQxensEy0tI7t.N8GDwXOkPncxwcYwj/tv15NQ0GO7dii
   display_name: ''
   groups:
   - admins

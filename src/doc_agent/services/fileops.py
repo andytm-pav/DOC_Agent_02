@@ -143,6 +143,48 @@ def search_locations(terms: list[str], limit: int = 20,
     return out
 
 
+def file_ids_at(path: str, db: Session | None = None) -> list[int]:
+    """v3.0.3: file_id карточек, чей АКТУАЛЬНЫЙ путь равен данному.
+
+    Используется реконсилиацией watcher'а: файл на диске удалён/изменён —
+    находим карточки, которые «живут» по этому пути (file_locations,
+    is_current=1, точное совпадение строки пути)."""
+    own = db is None
+    if db is None:
+        db = get_session_factory()()
+    try:
+        rows = db.execute(
+            select(FileLocation.file_id).where(
+                FileLocation.path == str(path), FileLocation.is_current == 1)
+        ).scalars().all()
+        return sorted({int(r) for r in rows})
+    finally:
+        if own:
+            db.close()
+
+
+def forget_path(path: str, actor: str = "system") -> int:
+    """v3.0.3: пометить путь устаревшим (is_current=0) у всех карточек.
+
+    Агент перестаёт считать файл лежащим по этому пути (file_link больше
+    не даёт мёртвых ссылок), карточка с содержимым ОСТАЁТСЯ в картотеке —
+    копия в data/storage не зависит от судьбы оригинала. Возвращает число
+    помеченных записей."""
+    factory = get_session_factory()
+    with factory() as db:
+        res = db.execute(
+            update(FileLocation)
+            .where(FileLocation.path == str(path), FileLocation.is_current == 1)
+            .values(is_current=0)
+        )
+        db.commit()
+        marked = int(res.rowcount or 0)
+    if marked:
+        log_audit(actor, "file_path_forgotten", {"path": str(path), "marked": marked})
+        log.info("file_path_forgotten", path=str(path), marked=marked)
+    return marked
+
+
 # ---------- операции ----------
 
 def _file_name_for(file_id: int, db: Session) -> str:
@@ -271,8 +313,17 @@ def file_link_block(terms: list[str], file_ids: list[int],
                     db: Session) -> tuple[str, list[dict]]:
     """Блок «где лежат файлы» для ответа в чате (action file_link).
 
-    Возвращает (текст, файлы для чипов). paths — только запомненные;
-    файлы картотеки без путей показываются подсказкой сохранить путь.
+    v3.0.1 (баг: «покажи путь, где лежат ЭТИ договора» выдавал пути
+    посторонних файлов): раньше при пустых file_ids и terms возвращались
+    ПОСЛЕДНИЕ запомненные пути любых файлов — выглядит как ответ, хотя
+    файлы не те. Теперь:
+      1) file_ids (из контекста беседы, правило планировщика) — точный
+         ответ по этим файлам;
+      2) terms — запомненные пути по термам + файлы картотеки, найденные
+         ПО НАЗВАНИЯМ (даже если путь не запомнен — честное «путь не
+         запомнен» по ПРАВИЛЬНЫМ файлам);
+      3) иначе — честное «не удалось определить, о каких файлах речь»,
+         никаких случайных путей.
     """
     rows: list[dict] = []
     if file_ids:
@@ -283,11 +334,25 @@ def file_link_block(terms: list[str], file_ids: list[int],
                 rows.append({"file_id": fid, "file_name": name, "path": str(cur), "kind": "known"})
             else:
                 rows.append({"file_id": fid, "file_name": name, "path": "", "kind": "unknown"})
-    else:
+    elif terms:
+        # v3.0.1: сначала запомненные пути по термам...
         rows = search_locations(terms, limit=10, db=db)
+        # ...затем файлы картотеки по названиям (путь может быть не
+        # запомнен — но пользователь должен увидеть именно ЕГО файлы)
+        from doc_agent.services.intents import _load_files, match_files
+
+        known = {r["file_id"] for r in rows}
+        for f in match_files(terms, _load_files(db))[:10]:
+            if f.id in known:
+                continue
+            rows.append({"file_id": int(f.id), "file_name": f.original_name,
+                         "path": "", "kind": "unknown"})
+            known.add(int(f.id))
+        rows = rows[:10]
     if not rows:
-        return ("Запомненных путей для этого запроса нет. Путь запоминается при "
-                "импорте папки или его можно указать в админ-вкладке «Файлы на диске».", [])
+        return ("Не удалось определить, о каких файлах речь. Назовите файл "
+                "(например, «покажи путь к договору по Вилоновской») или "
+                "обратитесь к файлам из предыдущего ответа по имени.", [])
     lines = ["Пути файлов на диске:"]
     chips: list[dict] = []
     for r in rows:

@@ -132,10 +132,23 @@ def _e5_embed(texts: list[str], is_query: bool) -> list[list[float]]:
     cfg = load_settings().embeddings
     prefix = cfg.query_prefix if is_query else cfg.passage_prefix
     if _st_model is None:
-        from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
-
+        # v3.0.3: без пакета — понятная ошибка с инструкцией, а не голый
+        # ModuleNotFoundError (промышленный UX: пользователь сразу видит
+        # команду установки и раздел README)
+        try:
+            from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+        except ImportError as exc:
+            raise RuntimeError(
+                "Локальные эмбеддинги (backend: sentence_transformers) требуют "
+                'пакет sentence-transformers: pip install -e ".[ml]" '
+                "(README, раздел «Локальные эмбеддинги»)"
+            ) from exc
         _st_model = SentenceTransformer(cfg.model, device=_st_device())
-    encoded = _st_model.encode([prefix + t for t in texts], normalize_embeddings=True)
+    # v3.0.3: batch_size из конфига ДОХОДИТ до локальной модели (v2.9
+    # задумывалось, но encode() его не передавал — всегда дефолт 32)
+    encoded = _st_model.encode([prefix + t for t in texts],
+                               batch_size=max(cfg.batch_size, 1),
+                               normalize_embeddings=True)
     if _st_dim is None and getattr(encoded, "shape", None):
         _st_dim = int(encoded.shape[1])  # фактическая размерность модели
     return [list(map(float, row)) for row in encoded]
@@ -211,12 +224,23 @@ def expected_dim() -> int | None:
         d = load_settings().embeddings.api.dimensions
         return d if d > 0 else None
     if backend == "sentence_transformers":
-        # v2.9: явная размерность из конфига -> фактическая после загрузки
-        # модели -> дефолт e5-small (384) до первой загрузки.
+        # v2.9/v3.0.3: явная размерность из конфига сильнее модели; далее —
+        # фактическая у ЗАГРУЖЕННОЙ модели (get_sentence_embedding_dimension),
+        # до загрузки — None (размерность неизвестна): честнее догадки «384»,
+        # которая врёт для bge-m3 (1024) — симметрично api-ветке.
         cfg = load_settings().embeddings
         if cfg.dimensions > 0:
             return cfg.dimensions
-        return _st_dim if _st_dim is not None else DIM
+        if _st_dim is not None:
+            return _st_dim
+        if _st_model is not None:
+            try:
+                model_dim: int | None = _st_model.get_sentence_embedding_dimension()
+            except Exception:  # noqa: BLE001 — не у всех моделей есть метод
+                model_dim = None
+            if model_dim:
+                return int(model_dim)
+        return None
     return DIM
 
 
@@ -249,12 +273,19 @@ def embedding_space_id() -> str:
     """
     backend = resolve_backend()
     if backend == "hashing":
-        model = "hashing-384"
+        model, dim_suffix = "hashing-384", ""
     elif backend == "api":
         cfg = load_settings().embeddings.api
-        model = cfg.model if cfg.dimensions <= 0 else f"{cfg.model}-d{cfg.dimensions}"
+        model = cfg.model
+        dim_suffix = f"-d{cfg.dimensions}" if cfg.dimensions > 0 else ""
     else:
-        model = load_settings().embeddings.model
-    h = hashlib.md5(model.encode("utf-8")).hexdigest()[:6]
+        # v3.0.3: размерность локальной модели входит в идентификатор
+        # пространства (как у api) — смена dimensions больше НЕ смешивает
+        # векторы разной размерности в одной коллекции (в имени суффикс
+        # виден ВСЕГДА: он не урезается вместе с именем модели)
+        lcfg = load_settings().embeddings
+        model = lcfg.model
+        dim_suffix = f"-d{lcfg.dimensions}" if lcfg.dimensions > 0 else ""
+    h = hashlib.md5(f"{model}{dim_suffix}".encode("utf-8")).hexdigest()[:6]
     safe_model = re.sub(r"[^a-zA-Z0-9-]", "-", model)[:24].strip("-") or "m"
-    return f"{backend}-{safe_model}-{h}"
+    return f"{backend}-{safe_model}{dim_suffix}-{h}"

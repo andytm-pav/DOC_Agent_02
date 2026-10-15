@@ -287,8 +287,8 @@ def main() -> int:
         check("уверенность RAG > 0.3 (раньше 0.11 у мусора)",
               float(res.get("confidence") or 0) > 0.3, str(res.get("confidence")))
         check("в файлах ответа нет шума (Конкурсная/Аэр)",
-              files and all("аэр" not in f["file_name"].lower()
-                            and "конкурсная" not in f["file_name"].lower() for f in files),
+              bool(files) and all("аэр" not in f["file_name"].lower()
+                                  and "конкурсная" not in f["file_name"].lower() for f in files),
               str(files))
 
         status = api("GET", "/status", tok)
@@ -312,8 +312,8 @@ def main() -> int:
     try:
         tok = api("POST", "/auth/login", body={"username": "admin", "password": "admin"})["access_token"]
         card = api("GET", "/card?limit=100", tok)
-        rows = card.get("items") if isinstance(card, dict) else card
-        check("после сброса картотека пуста", not rows, str(rows)[:120])
+        card_rows = card.get("items") if isinstance(card, dict) else card
+        check("после сброса картотека пуста", not card_rows, str(card_rows)[:120])
         res = api("POST", "/query", tok, {"q": "что в сметах по вилоновской?"})
         check("после сброса «НЕТ ДАННЫХ» вместо галлюцинаций",
               "НЕТ ДАННЫХ" in res.get("answer", ""), str(res)[:150])

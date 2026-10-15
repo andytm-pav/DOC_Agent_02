@@ -268,7 +268,7 @@ class PlannerSettings(BaseModel):
     # Оборачивать списки/подсчёты картотеки в естественный язык через LLM
     # (числа и [file_id:N] копируются из данных без изменений)
     synthesize_lists: bool = True
-    context_max_chars: int = 1200    # сколько контекста беседы отдать планировщику
+    context_max_chars: int = 2400    # сколько контекста беседы отдать планировщику (v3.0.1: 1200 -> 2400 — длинные беседы теряли «эти файла»)
     catalog_for_planner: bool = True # отдавать картотеку планировщику (выбор файла)
     catalog_max_chars: int = 4000
 
@@ -299,6 +299,10 @@ class FeedbackSettings(BaseModel):
     similarity_threshold: float = 0.45
     inject_known_answers: bool = True
     max_inject: int = 2
+    # v3.0.3: лимит длины ОДНОГО проверенного ответа в промпте (символы).
+    # Раньше жёстко 3000: исправленный ответ с Markdown-таблицей обрезался
+    # посередине и ломался рендер. 0 = без лимита.
+    max_inject_chars: int = 6000
     boost_documents: bool = True
     # Множитель буста за 👍 (и минус за 👎): score * (1 + bonus*weight*sim),
     # суммарный бонус по документу ограничен boost_cap.
@@ -337,9 +341,28 @@ class UsersSettings(BaseModel):
 
 
 class WatchdogSettings(BaseModel):
+    """Слежение за папками входящих (v3.0.3: полная реконсилиация диска).
+
+    Раньше отслеживались только НОВЫЕ файлы: удаление/перемещение/правка
+    файла оставляли картотеку и память путей устаревшими (мёртвые ссылки
+    file_link, ответы по старому содержимому)."""
     enabled: bool = False
     paths: list[str] = Field(default_factory=lambda: ["./data/inbox"])
     interval_sec: int = 30
+    # Следить за изменениями (удаление/перемещение/правка), а не только
+    # за новыми файлами. false = поведение v3.0.2.
+    track_changes: bool = True
+    # Реакция на УДАЛЕНИЕ файла из watched-папки:
+    #   forget_path — путь помечается устаревшим (file_link не даёт мёртвых
+    #                 ссылок), карточка с содержимым остаётся в картотеке
+    #                 (безопасно для сценариев «папка-след»);
+    #   remove      — карточка удаляется целиком (чанки, векторы, audit).
+    on_delete: str = "forget_path"
+    # Реакция на ИЗМЕНЕНИЕ содержимого файла:
+    #   reingest — пересверить sha256: изменился — старая карточка удаляется,
+    #              файл принимается заново; не изменился — ничего не делается;
+    #   ignore   — не следить за правками.
+    on_modify: str = "reingest"
 
 
 class LLMSettings(BaseModel):
@@ -360,6 +383,13 @@ class LLMSettings(BaseModel):
     # Пример для reasoning-моделей Zhipu/Z.ai (glm-4.5*, glm-4.6):
     #   {"thinking": {"type": "disabled"}} — быстрее и без <think> в ответе.
     extra_body: dict[str, Any] = Field(default_factory=dict)
+    # v3.0.1: лимит ТОКЕНОВ ОТВЕТА (0 = не отправлять — действует лимит
+    # провайдера). Проверка лимитов показала: у части провайдеров дефолт
+    # мал (~1024 токена) — развёрнутые ответы по длинным документам
+    # (таблицы договоров, сравнение версий) обрезаются на середине.
+    # Рекомендация для длинных документов: 4096-8192 (glm-4.5-flash
+    # поддерживает до 96k вывода). Для Ollama уходит как num_predict.
+    max_tokens: int = 0
 
 
 class EmbeddingApiSettings(BaseModel):

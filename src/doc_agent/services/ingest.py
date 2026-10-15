@@ -98,6 +98,32 @@ def enqueue_file(tmp_path: Path, original_name: str, source: str = "user") -> di
         return {"file_id": file_id, "status": "queued", "message": "Файл принят"}
 
 
+def remove_file(file_id: int, reason: str, actor: str = "system") -> bool:
+    """v3.0.3: удалить файл из картотеки (шаги конвейера откатываются).
+
+    Обратная операция enqueue/process: запись File (+ каскад чанки/таблицы/
+    связи/jobs/пути — PRAGMA foreign_keys=ON), векторы Chroma, запись в
+    audit_log. Вызывается watcher'ом при реконсилиации (файл удалён/
+    изменён на диске, watchdog.on_delete: remove) и доступен тестам.
+    Возвращает True, если карточка существовала и удалена.
+    """
+    factory = get_session_factory()
+    with factory() as db:
+        f = db.get(File, file_id)
+        if f is None:
+            return False
+        name = f.original_name
+        db.delete(f)
+        db.commit()
+    try:
+        get_vector_store().delete_file(file_id)
+    except Exception as exc:  # noqa: BLE001 — вектор может быть недоступен
+        log.warning("remove_file_vector_failed", file_id=file_id, error=str(exc))
+    log_audit(actor, "file_removed", {"file_id": file_id, "name": name, "reason": reason})
+    log.info("file_removed", file_id=file_id, name=name, reason=reason)
+    return True
+
+
 def _tree_has_unreadable(tree: dict) -> int:
     return int(tree.get("unreadable", 0) or 0)
 

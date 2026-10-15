@@ -20,6 +20,7 @@ class _FakeST:
     """Фейковый SentenceTransformer: запоминает вызовы encode()."""
 
     calls: list[dict] = []
+    init_args: dict = {}  # v3.0.3: аннотация класса (mypy attr-defined)
     dim = 384
 
     def __init__(self, model: str, device: Any = None) -> None:
@@ -111,12 +112,14 @@ def test_friendly_error_without_package(monkeypatch) -> None:
     голый ModuleNotFoundError."""
     _set_local(monkeypatch)
 
+    import builtins
+
+    real_import = builtins.__import__  # v3.0.3: иначе _raise зовёт сам себя
+
     def _raise(name: str, *a: Any, **kw: Any) -> Any:
         if name == "sentence_transformers":
             raise ImportError(name)
-        return __import__(name, *a, **kw)
-
-    import builtins
+        return real_import(name, *a, **kw)
 
     monkeypatch.setattr(builtins, "__import__", _raise)
     with pytest.raises(RuntimeError, match=r'\.\[ml\]'):

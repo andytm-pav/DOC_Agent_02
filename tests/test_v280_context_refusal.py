@@ -2,9 +2,10 @@
 ошибки API, rate-limit backoff."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from doc_agent.config import load_settings
+from doc_agent.db.models import File
 from doc_agent.services import ingest as ingest_mod
 from doc_agent.services import query as query_mod
 from doc_agent.vector import embedder
@@ -62,7 +63,7 @@ def test_doc_note_fallback_offline(client, monkeypatch) -> None:
                 customer = "ООО Ромашка"
                 city = "Самара"
                 contract_no = "12"
-            note = ingest_mod.doc_note(_P(), "текст")
+            note = ingest_mod.doc_note(cast(File, _P()), "текст")  # фейк без БД
         else:
             note = ingest_mod.doc_note(f, "текст")
     assert note
@@ -176,7 +177,9 @@ def test_chat_retries_on_429_then_succeeds(monkeypatch) -> None:
 
         def raise_for_status(self) -> None:
             if self.status_code >= 400:
-                raise oc.httpx.HTTPStatusError("err", request=None, response=None)
+                # request/response-объекты симуляции не нужны (None намеренно)
+                raise oc.httpx.HTTPStatusError(
+                    "err", request=None, response=None)  # type: ignore[arg-type]
 
         def json(self) -> dict:
             return {"choices": [{"message": {"content": "ок"}}]}
@@ -209,7 +212,9 @@ def test_chat_4xx_no_retry(monkeypatch) -> None:
         text = '{"error":{"message":"model not found"}}'
 
         def raise_for_status(self) -> None:
-            raise oc.httpx.HTTPStatusError("err", request=None, response=None)
+            # request/response-объекты симуляции не нужны (None намеренно)
+            raise oc.httpx.HTTPStatusError(
+                "err", request=None, response=None)  # type: ignore[arg-type]
 
     def fake_post(*a: Any, **kw: Any) -> _Resp:
         calls["n"] += 1

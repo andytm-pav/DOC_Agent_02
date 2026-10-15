@@ -29,6 +29,7 @@ config/prompts/help.txt (инлайн-промпты запрещены).
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
@@ -395,10 +396,37 @@ def find_files_answer(
 
 # ---------- картотека для промпта репортера ----------
 
+def _format_dup_map(files: list) -> dict[int, int]:
+    """v3.0.1: file_id -> file_id «близнеца» — ОДИН документ в разных
+    форматах (например, один договор в .docx и .pdf): нормализованные
+    имена (без расширения, в нижнем регистре, со схлопнутыми пробелами)
+    совпадают. Первый файл группы (меньший id) считается основным —
+    остальным в каталоге ставится пометка. Без привязок к фразам:
+    это детерминированная пометка данных для LLM (планировщик и репортер
+    видят её в каталоге и не считают один документ двумя договорами).
+    Разные редакции (в имени «ред1», «(2)», «согласованный») имеют РАЗНЫЕ
+    нормализованные имена и не схлопываются — это честные версии.
+    """
+    groups: dict[str, list[int]] = {}
+    for f in files:
+        stem = re.sub(r"\s+", " ", Path(str(f.original_name or "")).stem.lower()).strip()
+        if stem:
+            groups.setdefault(stem, []).append(int(f.id))
+    out: dict[int, int] = {}
+    for ids in groups.values():
+        if len(ids) > 1:
+            for fid in ids[1:]:
+                out[fid] = ids[0]
+    return out
+
+
 def catalog_block(db: Session) -> str:
     """«Агент знает, какие файлы есть»: список файлов с типом и кратким
     описанием (description классификатора или начало первого чанка).
-    Лимиты — qa.catalog_*; строка добавляется в промпт репортера."""
+    Лимиты — qa.catalog_*; строка добавляется в промпт репортера.
+    v3.0.1: файлы-близнецы (один документ в разных форматах) помечаются
+    «[ТОТ ЖЕ ДОКУМЕНТ, что file_id:N — другой формат]» — LLM видит,
+    что это один документ, а не два договора."""
     s = load_settings().qa
     files = _load_files(db)
     if not files:
@@ -412,6 +440,7 @@ def catalog_block(db: Session) -> str:
             first_chunk[int(fid)] = text or ""
     lines: list[str] = []
     total_chars = 0
+    dup_map = _format_dup_map(files)  # v3.0.1: близнецы-форматы
     for f in files:
         if len(lines) >= s.catalog_max_files:
             lines.append(f"…и ещё {len(files) - len(lines)} файлов — спросите «покажи все файлы».")
@@ -420,6 +449,8 @@ def catalog_block(db: Session) -> str:
         brief = brief[: s.catalog_brief_chars]
         label = _type_label(s, f.doc_type)
         line = f"• {f.original_name} [file_id:{f.id}]"
+        if f.id in dup_map:  # v3.0.1: пометка «один документ, другой формат»
+            line += f" [ТОТ ЖЕ ДОКУМЕНТ, что file_id:{dup_map[f.id]} — другой формат]"
         if label:
             line += f" — {label}"
         if f.contract_no:

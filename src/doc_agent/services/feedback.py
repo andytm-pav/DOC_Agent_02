@@ -288,12 +288,15 @@ def known_answers_block(question: str, db: Session | None = None) -> str:
         return ""
     blocks: list[str] = []
     used_ids: list[int] = []
+    # v3.0.3: лимит длины из конфига (feedback.max_inject_chars, 0 = без
+    # лимита) — раньше жёсткие [:3000] резали проверенные ответы с таблицами
+    limit = max(int(s.max_inject_chars), 0)
     for entry, sim in matches:
         answer = (entry.corrected_answer or "").strip() or entry.answer.strip()
         if not answer:
             continue
         mark = "исправленный пользователем ответ" if entry.corrected_answer else "подтверждённый ответ"
-        blocks.append(f"[{mark} · совпадение {sim:.2f}]\n{answer[:3000]}")
+        blocks.append(f"[{mark} · совпадение {sim:.2f}]\n{answer[:limit] if limit else answer}")
         used_ids.append(int(entry.id))
     if not blocks:
         return ""

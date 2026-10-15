@@ -136,11 +136,24 @@ function feedbackStrip() {
         + "<span class='fb-thanks muted' hidden>Отзыв сохранён — спасибо! Агент учтёт его на похожих вопросах.</span></div>";
 }
 
+/* v3.0.1: визуальная отметка выбранной оценки — кнопка подсвечивается
+   сразу при клике (класс .fb-active), иначе непонятно, что выбрал
+   пользователь. Переключение между 👍/👎 снимает прежнюю отметку. */
+function markFeedbackChoice(strip, rating) {
+    strip.querySelectorAll(".fb-btn").forEach((b) => {
+        b.classList.toggle("fb-active", b.dataset.rating === rating);
+    });
+}
+
 function wireFeedback(div) {
     const strip = div.querySelector(".fb-strip");
     if (!strip) return;
-    strip.querySelector(".fb-btn[data-rating='up']").addEventListener("click", () => sendFeedback(div, "up"));
+    strip.querySelector(".fb-btn[data-rating='up']").addEventListener("click", () => {
+        markFeedbackChoice(strip, "up");
+        sendFeedback(div, "up");
+    });
     strip.querySelector(".fb-btn[data-rating='down']").addEventListener("click", () => {
+        markFeedbackChoice(strip, "down");
         const form = strip.querySelector(".fb-form");
         form.hidden = false;
         form.querySelector(".fb-textarea").focus();
@@ -167,6 +180,8 @@ async function sendFeedback(div, rating) {
         if (!r.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Ошибка отправки");
         if (form) form.hidden = true;
         strip.querySelector(".fb-thanks").hidden = false;
+        // v3.0.1: отметка остаётся видимой и после отправки (кнопки гаснут,
+        // но выбранная остаётся подсвеченной — видно, что отправлено)
         strip.querySelectorAll(".fb-btn").forEach((b) => (b.disabled = true));
     } catch (err) {
         strip.querySelector(".fb-thanks").hidden = false;

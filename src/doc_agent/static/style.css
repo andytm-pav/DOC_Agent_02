@@ -258,6 +258,14 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px; }
 /* v3.0.0: обратная связь в чате (👍/👎 + исправление) */
 .fb-strip { margin-top: 8px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .fb-btn { padding: 2px 10px; font-size: 15px; }
+/* v3.0.1: выбранная оценка подсвечивается цветом акцента — видно, что
+   нажал пользователь; после отправки кнопки гаснут, выбор остаётся виден */
+.fb-btn.fb-active {
+    background: var(--accent-2);
+    border-color: var(--accent-2);
+    color: #04121f;
+}
+.fb-btn:disabled { opacity: .55; cursor: default; }
 .fb-form { display: flex; gap: 6px; align-items: flex-start; width: 100%; margin-top: 4px; }
 .fb-textarea {
     flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid #475569;

@@ -97,7 +97,7 @@ def test_bm25_sees_chunks_beyond_4000(tmp_data_dir: Path) -> None:
         files = db.execute(select(File)).scalars().all()
         chunks = db.execute(select(Chunk)).scalars().all()
         ret = RetrieverAgent()
-        hits = ret.bm25_top(chunks, "материалы вилоновская унифлекс", 10)
+        hits = ret.bm25_top(list(chunks), "материалы вилоновская унифлекс", 10)
         assert hits, "BM25 ничего не нашёл"
         assert hits[0][0] == target_chunk.id, "целевой чанк не первый"
         assert files  # кандидаты присутствуют
@@ -289,7 +289,8 @@ def test_store_uses_suffixed_collection(tmp_data_dir: Path) -> None:
     from doc_agent.vector.chroma_client import get_vector_store
 
     store = get_vector_store()
-    name = getattr(store.collection, "name", "")
+    collection = getattr(store, "collection", None)  # у lite-хранилища нет collection
+    name = getattr(collection, "name", "")
     assert name.startswith("chunks-"), name
 
 

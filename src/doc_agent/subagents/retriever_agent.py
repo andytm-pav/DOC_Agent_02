@@ -21,6 +21,8 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -32,6 +34,17 @@ from doc_agent.vector.embedder import embed_query, lexical_tokens, tokenize
 from doc_agent.vector.stemmer import compat_hits, stem_token, stems_compatible
 
 log = get_logger("subagent.retriever")
+
+# v3.0.3: кэш BM25-индекса (аудит v3.0.2: индекс пересобирался на КАЖДЫЙ
+# запрос — токенизация+стемминг всего корпуса были самой дорогой частью
+# ретрива). Ключ — (кортеж id чанков, суммарная длина): при ре-ингесте
+# чанки получают НОВЫЕ id, а переиспользованные после удаления rowid
+# различаются длиной — устаревание исключено. Один слот: сменился корпус —
+# пересборка. Корпуса больше bm25_cache_max_chunks не кэшируются (не
+# удерживаем сотни МБ токенов).
+_BM25_CACHE_MAX_CHUNKS = 100_000
+_bm25_cache_key: tuple[tuple[int, ...], int] | None = None
+_bm25_cache: tuple[Any, list[int], set[str]] | None = None
 
 STOPWORDS = {"и", "в", "на", "по", "с", "для", "как", "что", "это", "все", "покажи", "дай",
              "найди", "the", "a", "of", "или", "к", "у", "за", "из", "от", "до",
@@ -97,25 +110,40 @@ class RetrieverAgent:
         return list(db.execute(stmt).scalars().all())
 
     def bm25_top(self, chunks: list[Chunk], query: str, n: int) -> list[tuple[int, float]]:
-        corpus_tokens = [lexical_tokens(c.text) for c in chunks]
+        global _bm25_cache_key, _bm25_cache
         q_terms = _query_terms(query)
-        if not corpus_tokens or not q_terms:
+        if not chunks or not q_terms:
             return []
-        # v2.7: расширение термов по словарю корпуса (префиксная
-        # совместимость стеммов — см. _expand_terms)
-        vocab: set[str] = set()
-        for toks in corpus_tokens:
-            vocab.update(toks)
-        q_tokens = _expand_terms(q_terms, vocab)
-        try:
-            from rank_bm25 import BM25Okapi
+        # v3.0.3: индекс строится один раз на корпус. Ключ — кортеж id чанков
+        # ПЛЮС суммарная длина текстов: SQLite после удаления переиспользует
+        # rowid — «новые чанки со старыми id» различаются длиной (перестраховка
+        # от устаревшего индекса; сама токенизация при этом не повторяется).
+        ids_key = (tuple(c.id for c in chunks), sum(len(c.text or "") for c in chunks))
+        if _bm25_cache_key == ids_key and _bm25_cache is not None:
+            bm25, chunk_ids, vocab = _bm25_cache
+        else:
+            corpus_tokens = [lexical_tokens(c.text) for c in chunks]
+            if not corpus_tokens:
+                return []
+            # v2.7: расширение термов по словарю корпуса (префиксная
+            # совместимость стеммов — см. _expand_terms)
+            built_vocab: set[str] = set()
+            for toks in corpus_tokens:
+                built_vocab.update(toks)
+            try:
+                from rank_bm25 import BM25Okapi
 
-            bm25 = BM25Okapi(corpus_tokens)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("bm25_failed", error=str(exc))
-            return []
+                bm25 = BM25Okapi(corpus_tokens)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("bm25_failed", error=str(exc))
+                return []
+            chunk_ids = [c.id for c in chunks]
+            if len(chunks) <= _BM25_CACHE_MAX_CHUNKS:
+                _bm25_cache_key, _bm25_cache = ids_key, (bm25, chunk_ids, built_vocab)
+            vocab = built_vocab
+        q_tokens = _expand_terms(q_terms, vocab)
         scores = bm25.get_scores(q_tokens)
-        ranked = sorted(zip([c.id for c in chunks], scores), key=lambda x: x[1], reverse=True)
+        ranked = sorted(zip(chunk_ids, scores), key=lambda x: x[1], reverse=True)
         max_s = max((s for _, s in ranked), default=1.0) or 1.0
         return [(cid, float(s) / max_s) for cid, s in ranked[:n] if s > 0]
 

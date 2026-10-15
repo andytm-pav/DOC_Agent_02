@@ -29,6 +29,7 @@ from doc_agent.logging import get_logger
 from doc_agent.services import feedback as feedback_service
 from doc_agent.services import fileops as fileops_service
 from doc_agent.services.deep_read import try_deep_read
+from doc_agent.services.groundrails import citations_in, numbers_in
 from doc_agent.services.intents import (
     catalog_block,
     count_files_answer,
@@ -98,7 +99,13 @@ def _maybe_synthesize(question: str, res: dict) -> dict:
     """Обернуть детерминированные данные картотеки (список/подсчёт) в
     естественный язык через LLM (planner.synthesize_lists). Числа и
     [file_id:N] копируются из данных без изменений (промпт synthesis.txt);
-    сбой LLM -> детерминированный текст как есть."""
+    сбой LLM -> детерминированный текст как есть.
+
+    v3.0.3: ГЕЙТ ЧЕСТНОСТИ ПЕРЕСКАЗА — все числа LLM-ответа должны идти
+    из детерминированных данных, все его цитаты [file_id:N] — существовать
+    среди цитат данных. Нарушил (придумал цифру/файл) — откат к
+    детерминированному тексту (раньше synthesis был единственным путём,
+    где LLM могла исказить факт без проверки)."""
     s = load_settings()
     if not s.planner.synthesize_lists or s.llm.provider == "none":
         return res
@@ -109,6 +116,11 @@ def _maybe_synthesize(question: str, res: dict) -> dict:
         log.warning("synthesis_failed", error=str(exc))
         return res
     if not answer:
+        return res
+    facts = res["answer"] or ""
+    if not (numbers_in(answer).issubset(numbers_in(facts))
+            and citations_in(answer).issubset(citations_in(facts))):
+        log.warning("synthesis_ungrounded_fallback", facts_chars=len(facts))
         return res
     out = dict(res)
     out["answer"] = answer
